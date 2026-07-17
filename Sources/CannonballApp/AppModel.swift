@@ -315,8 +315,13 @@ public final class AppModel {
                                                ambientC: state.ambientTempC.value,
                                                minutesToArrival: minutesToStop)
             if case .startNow = advice.action {
-                await engine.submit(kind: .preconditionNow, message:
-                    "Start preconditioning now — arrive at \(siteName) with cells at \(Int(advice.predictedArrivalTempWithPrecondition)) °C instead of \(Int(advice.predictedArrivalTempNoPrecondition)) °C.")
+                let message = switch advice.mode {
+                case .heat:
+                    "Start preconditioning now — arrive at \(siteName) with cells at \(Int(advice.predictedArrivalTempWithPrecondition)) °C instead of \(Int(advice.predictedArrivalTempNoPrecondition)) °C."
+                case .cool:
+                    "Start precooling now — pack is trending to \(Int(advice.predictedArrivalTempNoPrecondition)) °C at \(siteName); cooling toward \(Int(advice.predictedArrivalTempWithPrecondition)) °C avoids the hot-side taper."
+                }
+                await engine.submit(kind: .preconditionNow, message: message)
             }
         }
 
