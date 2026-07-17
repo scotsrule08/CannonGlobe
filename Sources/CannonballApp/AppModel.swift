@@ -117,7 +117,16 @@ public final class AppModel {
         }
     }
 
+    /// Corridor sites sit ≤ ~65 mi apart crow-flies; beyond this the car is
+    /// genuinely off the run and the DP plan would be projection garbage.
+    private static let offCorridorThresholdMi = 80.0
+
     private func replan(_ state: VehicleState) async {
+        if nearestSiteDistanceMi(of: state.coordinate.value) > Self.offCorridorThresholdMi {
+            let cloud = await tessie.latestCloudState()
+            await MainActor.run { self.dashboard.update(offCorridor: cloud) }
+            return
+        }
         let mile = await routeMile(of: state.coordinate.value)
         let legBuilder = await corridor.legBuilderSnapshot()
         var freshPlanner = planner
@@ -169,6 +178,14 @@ public final class AppModel {
         // Fleet active_route destination → nearest corridor site match.
         guard let dest = try? await tessie.state().activeRouteDestination else { return nil }
         return sites.first { dest.localizedCaseInsensitiveContains($0.name.split(separator: ",").first ?? "") }?.id
+    }
+
+    private func nearestSiteDistanceMi(of coord: CLLocationCoordinate2D) -> Double {
+        let here = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
+        return sites.map {
+            here.distance(from: CLLocation(latitude: $0.coordinate.latitude,
+                                           longitude: $0.coordinate.longitude)) / 1609.34
+        }.min() ?? .infinity
     }
 
     /// Project a coordinate onto the corridor. Seed implementation: nearest

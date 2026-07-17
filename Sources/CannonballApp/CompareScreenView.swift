@@ -106,6 +106,7 @@ public struct CompareScreenView: View {
 extension DashboardViewModel {
     /// Plan-derived fields for the drive screen.
     public func update(plan: TripPlan, siteNames: [String: String]) {
+        arrivalLabel = "ARRIVE SOC"; minutesLabel = "MIN TO STOP"
         guard let stop = plan.stops.first, let leg = plan.legs.first else {
             nextStopName = "→ Destination"
             return
@@ -114,5 +115,33 @@ extension DashboardViewModel {
         arrivalSOCText = "\(Int(stop.arrivalSOC))%"
         arrivalSOCIsHealthy = stop.arrivalSOC >= 5
         minutesToStopText = "\(Int(leg.trafficDriveSeconds / 60))"
+    }
+
+    /// Off the cannonball corridor: the DP plan is meaningless, so show the
+    /// car's own state and (when navigating) its own arrival estimate.
+    public func update(offCorridor cloud: CloudVehicleState?) {
+        whPerMiText = "—"; deltaVsTeslaText = "—"; efficiencyOnPlan = true
+        guard let cloud else {
+            nextStopName = "Off corridor"
+            return
+        }
+        if let dest = cloud.activeRouteDestination {
+            let parts = dest.components(separatedBy: ", ")
+            nextStopName = parts.prefix(2).joined(separator: ", ")
+            arrivalLabel = "ARRIVE SOC"; minutesLabel = "MIN TO ARRIVE"
+            if let soc = cloud.activeRouteEnergyAtArrival {
+                arrivalSOCText = "\(Int(soc))%"
+                arrivalSOCIsHealthy = soc >= 10
+            } else {
+                arrivalSOCText = "—"
+            }
+            minutesToStopText = cloud.activeRouteMinutesToArrival.map { "\(Int($0))" } ?? "—"
+        } else {
+            nextStopName = "Off corridor"
+            arrivalLabel = "SOC NOW"; minutesLabel = "MI RANGE"
+            arrivalSOCText = "\(Int(cloud.socPercent))%"
+            arrivalSOCIsHealthy = cloud.socPercent >= 20
+            minutesToStopText = "\(Int(cloud.ratedRangeMi))"
+        }
     }
 }

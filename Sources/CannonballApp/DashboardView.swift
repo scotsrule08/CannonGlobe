@@ -16,9 +16,9 @@ public struct DashboardView: View {
                 Text(model.nextStopName).font(.title3.weight(.semibold))
             }
             HStack(alignment: .firstTextBaseline, spacing: 32) {
-                BigNumber(value: model.arrivalSOCText, label: "ARRIVE SOC",
+                BigNumber(value: model.arrivalSOCText, label: model.arrivalLabel,
                           tint: model.arrivalSOCIsHealthy ? .green : .orange)
-                BigNumber(value: model.minutesToStopText, label: "MIN TO STOP", tint: .primary)
+                BigNumber(value: model.minutesToStopText, label: model.minutesLabel, tint: .primary)
             }
             HStack(alignment: .firstTextBaseline, spacing: 32) {
                 BigNumber(value: model.whPerMiText, label: "Wh/mi vs PLAN",
@@ -79,6 +79,8 @@ struct BigNumber: View {
     public var arrivalSOCText = "—"
     public var arrivalSOCIsHealthy = true
     public var minutesToStopText = "—"
+    public var arrivalLabel = "ARRIVE SOC"
+    public var minutesLabel = "MIN TO STOP"
     public var whPerMiText = "—"
     public var efficiencyOnPlan = true
     public var deltaVsTeslaText = "—"
