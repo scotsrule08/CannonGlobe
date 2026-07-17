@@ -34,22 +34,18 @@ is a mission failure; the app optimizes ruthlessly for total door-to-door time.
 
 ## Building the app
 
-The repo is a Swift package (`CannonballCore` logic + `CannonballApp` UI). To
-produce the installable iOS app:
+The repo is a Swift package (`CannonballCore` logic + `CannonballApp` UI) plus
+an Xcode shell project in `Shell/`:
 
-1. In Xcode: **File → New → Project → iOS App** (name e.g. `CannonballShell`,
-   SwiftUI lifecycle), add this package as a local dependency, link
-   `CannonballApp`.
-2. Replace the generated `App` struct with:
-   ```swift
-   import CannonballApp
-   @main struct Shell: App { var body: some Scene { CannonballScene() } }
-   ```
-3. Add a **`Secrets.plist`** (never commit) with `TessieVIN` and `TessieToken`.
-4. Info.plist / capabilities (docs §2.6): `NSLocationAlwaysAndWhenInUseUsageDescription`,
-   `NSLocalNetworkUsageDescription`, background modes `location`, `audio`,
-   `processing`; request the Critical Alerts entitlement from Apple early.
-5. `swift test` runs the core suites (charge curve, SOC targets, trip planner)
+1. `cd Shell && xcodegen generate` produces `CannonballShell.xcodeproj`
+   (thin `@main` wrapper over `CannonballScene`, local package dependency,
+   Info.plist keys and background modes already configured).
+2. Copy `Shell/Secrets.example.plist` to `Shell/Secrets.plist` (gitignored,
+   never commit) and fill in `TessieVIN` and `TessieToken`.
+3. Build/run the `CannonballShell` scheme on a simulator or device. Remaining
+   capability work: request the Critical Alerts entitlement from Apple early
+   (docs §2.6).
+4. `swift test` runs the core suites (charge curve, SOC targets, trip planner)
    on any Mac — no simulator needed.
 
 Pre-run data tasks (Phase 0, docs §5.1): regenerate `CorridorSeed` from

@@ -1,0 +1,39 @@
+name: CannonballShell
+options:
+  bundleIdPrefix: com.spencer
+  deploymentTarget:
+    iOS: "17.0"
+packages:
+  CannonballCopilot:
+    path: ..
+targets:
+  CannonballShell:
+    type: application
+    platform: iOS
+    sources:
+      - Sources
+      - path: Secrets.plist
+        buildPhase: resources
+        optional: true
+    dependencies:
+      - package: CannonballCopilot
+        product: CannonballApp
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.spencer.cannonball
+        DEVELOPMENT_TEAM: 557K654PY5
+        CODE_SIGN_STYLE: Automatic
+        TARGETED_DEVICE_FAMILY: "1"
+        SWIFT_VERSION: "5.10"
+    info:
+      path: Info.plist
+      properties:
+        UILaunchScreen: {}
+        ITSAppUsesNonExemptEncryption: false
+        NSLocationAlwaysAndWhenInUseUsageDescription: Continuous route position drives the charge planner and stop alerts for the whole run.
+        NSLocationWhenInUseUsageDescription: Route position drives the charge planner and stop recommendations.
+        NSLocalNetworkUsageDescription: Connects to the S3XY Commander CAN bridge on the car's Wi-Fi (192.168.4.1) for live pack telemetry.
+        UIBackgroundModes:
+          - location
+          - audio
+          - processing
