@@ -32,8 +32,8 @@ public enum TessieError: Error { case http(Int), rateLimited(retryAfter: TimeInt
 /// Tessie mirrors Fleet API vehicle-data and adds history endpoints; the same
 /// protocol shape lets a direct Fleet API client swap in (docs §4.2).
 public actor TessieClient {
-    private let vin: String
-    private let token: String
+    private var vin: String
+    private var token: String
     private let base = URL(string: "https://api.tessie.com")!
     private let session: URLSession
 
@@ -48,6 +48,17 @@ public actor TessieClient {
     public init(vin: String, token: String, session: URLSession = .shared) {
         self.vin = vin; self.token = token; self.session = session
         updates = AsyncStream { self.streamContinuation = $0 }
+    }
+
+    public var hasCredentials: Bool { !vin.isEmpty && !token.isEmpty }
+
+    /// Swap credentials at runtime (in-app settings). The next poll and the
+    /// next streaming reconnect pick them up; the cache is invalidated so the
+    /// first read after a change is always fresh.
+    public func updateCredentials(vin: String, token: String) {
+        self.vin = vin; self.token = token
+        cached = nil
+        lastPoll = .distantPast
     }
 
     // MARK: REST
@@ -95,6 +106,9 @@ public actor TessieClient {
     public func startStreaming() {
         Task {
             while !Task.isCancelled {
+                guard hasCredentials else {                          // idle until configured
+                    try? await Task.sleep(for: .seconds(5)); continue
+                }
                 do { try await streamOnce() }
                 catch { try? await Task.sleep(for: .seconds(10)) }  // reconnect w/ backoff
             }

@@ -51,6 +51,12 @@ public final class AppModel {
         wire(config: config)
     }
 
+    /// Persist credentials from Settings and hand them to the live client.
+    public func applySecrets(vin: String, token: String) {
+        SecretsStore.save(vin: vin, token: token)
+        Task { await tessie.updateCredentials(vin: vin, token: token) }
+    }
+
     private func wire(config: RunConfig) {
         Task {
             await panda.start()

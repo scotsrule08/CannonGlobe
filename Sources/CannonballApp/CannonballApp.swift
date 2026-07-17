@@ -8,12 +8,16 @@ public struct CannonballScene: Scene {
     @State private var model: AppModel
 
     public init() {
-        // Secrets.plist (untracked, see README) → RunConfig.
+        // Keychain (in-app Settings) first, Secrets.plist as the dev fallback.
         let secrets = Bundle.main.url(forResource: "Secrets", withExtension: "plist")
             .flatMap { NSDictionary(contentsOf: $0) }
+        func clean(_ value: String?) -> String {
+            let v = value ?? ""
+            return v.hasPrefix("YOUR_") ? "" : v   // ignore template placeholders
+        }
         _model = State(initialValue: AppModel(config: RunConfig(
-            tessieVIN: secrets?["TessieVIN"] as? String ?? "",
-            tessieToken: secrets?["TessieToken"] as? String ?? "")))
+            tessieVIN: clean(SecretsStore.tessieVIN ?? secrets?["TessieVIN"] as? String),
+            tessieToken: clean(SecretsStore.tessieToken ?? secrets?["TessieToken"] as? String))))
     }
 
     public var body: some Scene {
@@ -27,7 +31,7 @@ public struct CannonballScene: Scene {
 struct RootView: View {
     let model: AppModel
     @State private var tab: Tab = .drive
-    enum Tab { case drive, charge, compare }
+    enum Tab { case drive, charge, compare, settings }
 
     var body: some View {
         TabView(selection: $tab) {
@@ -40,6 +44,9 @@ struct RootView: View {
             CompareScreenView(model: model.compare)
                 .tag(Tab.compare)
                 .tabItem { Label("Compare", systemImage: "arrow.triangle.branch") }
+            SettingsView(model: model)
+                .tag(Tab.settings)
+                .tabItem { Label("Settings", systemImage: "gearshape.fill") }
         }
     }
 }
