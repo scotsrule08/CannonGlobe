@@ -64,6 +64,15 @@ public final class AppModel {
         await tessie.currentStatus()
     }
 
+    public struct CarSnapshot: Sendable {
+        public var cloud: CloudVehicleState?
+        public var pack: PackProfile
+    }
+
+    func carSnapshot() async -> CarSnapshot {
+        CarSnapshot(cloud: await tessie.latestCloudState(), pack: pack)
+    }
+
     private func wire(config: RunConfig) {
         Task {
             await panda.start()

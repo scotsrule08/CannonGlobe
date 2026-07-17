@@ -18,6 +18,9 @@ public struct PackProfile: Sendable {
     public var hotFactor: [(tempC: Double, factor: Double)]
     /// SOC below which arrival is forbidden by the planner.
     public var bufferFloorSOC: Double
+    /// Cell-temp band for maximum DC charge rate — the preconditioning target
+    /// at Supercharger arrival (docs §1.4).
+    public var idealSuperchargeCellTempC: ClosedRange<Double>
 
     /// 2025 US Model 3 Premium RWD (higher-trim single-motor, 363 mi EPA):
     /// Panasonic 2170 NCA pack, 79 kWh usable new / ~82 kWh gross, 250 kW peak.
@@ -37,7 +40,8 @@ public struct PackProfile: Sendable {
         ],
         coldFactor: [(-10, 0.15), (0, 0.35), (10, 0.65), (20, 0.90), (25, 1.0), (45, 1.0)],
         hotFactor: [(45, 1.0), (50, 0.85), (55, 0.60), (60, 0.40)],
-        bufferFloorSOC: 5.0
+        bufferFloorSOC: 5.0,
+        idealSuperchargeCellTempC: 40...48
     )
 
     /// Safety-net fallback: CATL LFP60 (base-trim RWD packs in most markets).
@@ -54,7 +58,8 @@ public struct PackProfile: Sendable {
         ],
         coldFactor: [(-10, 0.08), (0, 0.22), (10, 0.50), (20, 0.85), (25, 1.0), (45, 1.0)],
         hotFactor: [(45, 1.0), (50, 0.85), (55, 0.60), (60, 0.40)],
-        bufferFloorSOC: 9.0   // LFP SOC estimation drift → bigger floor
+        bufferFloorSOC: 9.0,   // LFP SOC estimation drift → bigger floor
+        idealSuperchargeCellTempC: 35...45
     )
 
     /// Chemistry signature from live CAN: pack volts per cell group at a known

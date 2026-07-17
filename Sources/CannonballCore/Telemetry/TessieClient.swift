@@ -15,6 +15,20 @@ public struct CloudVehicleState: Sendable, Codable {
     public var batteryHeaterOn: Bool?
     public var activeRouteDestination: String?
     public var activeRouteMinutesToArrival: Double?
+    public var activeRouteMilesToArrival: Double?
+    /// The car's own trip-planner SOC prediction at the destination (%).
+    public var activeRouteEnergyAtArrival: Double?
+    public var displayName: String?
+    public var carType: String?
+    public var trimBadging: String?
+    public var odometerMi: Double?
+    public var headingDeg: Double?
+    public var usableBatteryLevel: Double?
+    public var chargeLimitSOC: Double?
+    public var minutesToFullCharge: Double?
+    /// BMS module temps from the fleet-telemetry stream (not in REST).
+    public var moduleTempMinC: Double?
+    public var moduleTempMaxC: Double?
 }
 
 public struct NearbyChargingSite: Sendable, Codable {
@@ -65,6 +79,7 @@ public actor TessieClient {
     }
     private var status = ConnectionStatus()
     public func currentStatus() -> ConnectionStatus { status }
+    public func latestCloudState() -> CloudVehicleState? { cached }
 
     private var activeSocket: URLSessionWebSocketTask?
 
@@ -97,7 +112,10 @@ public actor TessieClient {
         let url = base.appending(path: "\(vin)/state")
             .appending(queryItems: [.init(name: "use_cache", value: useCache ? "true" : "false")])
         do {
-            let fresh = try await get(url, as: TessieStateDTO.self).toCloudState()
+            var fresh = try await get(url, as: TessieStateDTO.self).toCloudState()
+            // Module temps only arrive via the stream — carry them across polls.
+            fresh.moduleTempMinC = cached?.moduleTempMinC
+            fresh.moduleTempMaxC = cached?.moduleTempMaxC
             lastPoll = .init(); cached = fresh
             status.lastUpdate = .init(); status.lastError = nil
             streamContinuation?.yield(fresh)
@@ -213,6 +231,10 @@ public actor TessieClient {
             case "DCChargingPower": if let n = v.number, n > 0 { merged.chargerPowerKW = n }
             case "ACChargingPower": if let n = v.number, n > 0 { merged.chargerPowerKW = n }
             case "BatteryHeaterOn": if let b = v.bool { merged.batteryHeaterOn = b }
+            case "ModuleTempMin": if let n = v.number { merged.moduleTempMinC = n }
+            case "ModuleTempMax": if let n = v.number { merged.moduleTempMaxC = n }
+            case "Odometer": if let n = v.number { merged.odometerMi = n }
+            case "GpsHeading": if let n = v.number { merged.headingDeg = n }
             case "DetailedChargeState": if let s = v.string {
                 merged.chargingState = s.contains("Charging")
                     ? (merged.chargerPowerKW ?? 0 > 20 ? "Supercharging" : "Charging")
@@ -304,20 +326,35 @@ struct TelemetryValue: Decodable {
 struct TessieStateDTO: Decodable {
     struct DriveState: Decodable {
         var latitude: Double; var longitude: Double; var speed: Double?
+        var heading: Double?
         var activeRouteDestination: String?
         var activeRouteMinutesToArrival: Double?
+        var activeRouteMilesToArrival: Double?
+        var activeRouteEnergyAtArrival: Double?
     }
     struct ChargeState: Decodable {
         var batteryLevel: Double; var batteryRange: Double
         var chargingState: String; var chargerPower: Double?
         var batteryHeaterOn: Bool?
+        var usableBatteryLevel: Double?
+        var chargeLimitSoc: Double?
+        var minutesToFullCharge: Double?
     }
     struct ClimateState: Decodable {
         var insideTemp: Double?; var outsideTemp: Double?
     }
+    struct VehicleConfig: Decodable {
+        var carType: String?; var trimBadging: String?
+    }
+    struct VehState: Decodable {
+        var odometer: Double?; var vehicleName: String?
+    }
+    var displayName: String?
     var driveState: DriveState
     var chargeState: ChargeState
     var climateState: ClimateState
+    var vehicleConfig: VehicleConfig?
+    var vehicleState: VehState?
 
     func toCloudState() -> CloudVehicleState {
         CloudVehicleState(
@@ -331,7 +368,18 @@ struct TessieStateDTO: Decodable {
             insideTempC: climateState.insideTemp, outsideTempC: climateState.outsideTemp,
             batteryHeaterOn: chargeState.batteryHeaterOn,
             activeRouteDestination: driveState.activeRouteDestination,
-            activeRouteMinutesToArrival: driveState.activeRouteMinutesToArrival)
+            activeRouteMinutesToArrival: driveState.activeRouteMinutesToArrival,
+            activeRouteMilesToArrival: driveState.activeRouteMilesToArrival,
+            activeRouteEnergyAtArrival: driveState.activeRouteEnergyAtArrival,
+            displayName: displayName ?? vehicleState?.vehicleName,
+            carType: vehicleConfig?.carType,
+            trimBadging: vehicleConfig?.trimBadging,
+            odometerMi: vehicleState?.odometer,
+            headingDeg: driveState.heading,
+            usableBatteryLevel: chargeState.usableBatteryLevel,
+            chargeLimitSOC: chargeState.chargeLimitSoc,
+            minutesToFullCharge: chargeState.minutesToFullCharge,
+            moduleTempMinC: nil, moduleTempMaxC: nil)
     }
 }
 

@@ -31,7 +31,7 @@ public struct CannonballScene: Scene {
 struct RootView: View {
     let model: AppModel
     @State private var tab: Tab = .drive
-    enum Tab { case drive, charge, compare, settings }
+    enum Tab { case drive, charge, car, compare, settings }
 
     var body: some View {
         TabView(selection: $tab) {
@@ -41,6 +41,9 @@ struct RootView: View {
             ChargeScreenView(model: model.charge)
                 .tag(Tab.charge)
                 .tabItem { Label("Charge", systemImage: "bolt.fill") }
+            CarView(model: model)
+                .tag(Tab.car)
+                .tabItem { Label("Car", systemImage: "car.fill") }
             CompareScreenView(model: model.compare)
                 .tag(Tab.compare)
                 .tabItem { Label("Compare", systemImage: "arrow.triangle.branch") }
