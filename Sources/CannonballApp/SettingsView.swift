@@ -1,4 +1,5 @@
 import SwiftUI
+import CannonballCore
 
 /// Tessie credential entry — keychain-persisted, applied to the live client
 /// without a restart.
@@ -7,10 +8,17 @@ struct SettingsView: View {
     @State private var vin = SecretsStore.tessieVIN ?? ""
     @State private var token = SecretsStore.tessieToken ?? ""
     @State private var savedAt: Date?
+    @State private var status = TessieClient.ConnectionStatus()
 
     var body: some View {
         NavigationStack {
             Form {
+                Section("Connection") {
+                    HStack(spacing: 10) {
+                        Circle().fill(statusColor).frame(width: 10, height: 10)
+                        Text(statusText).font(.callout)
+                    }
+                }
                 Section("Tessie") {
                     TextField("VIN", text: $vin)
                         .textInputAutocapitalization(.characters)
@@ -39,6 +47,29 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("Settings")
+            .task {
+                while !Task.isCancelled {
+                    status = await model.tessieStatus()
+                    try? await Task.sleep(for: .seconds(2))
+                }
+            }
         }
+    }
+
+    private var statusColor: Color {
+        if status.lastError != nil { return .red }
+        if let last = status.lastUpdate, Date().timeIntervalSince(last) < 60 { return .green }
+        return .secondary.opacity(0.5)
+    }
+
+    private var statusText: String {
+        if let err = status.lastError { return err }
+        if let last = status.lastUpdate {
+            let age = Int(Date().timeIntervalSince(last))
+            let channel = status.streamingConnected ? "streaming" : "polling"
+            return "Live (\(channel)) · updated \(age)s ago"
+        }
+        return (SecretsStore.tessieVIN ?? "").isEmpty
+            ? "Not configured" : "Waiting for first update…"
     }
 }

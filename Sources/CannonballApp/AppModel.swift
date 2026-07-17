@@ -54,7 +54,14 @@ public final class AppModel {
     /// Persist credentials from Settings and hand them to the live client.
     public func applySecrets(vin: String, token: String) {
         SecretsStore.save(vin: vin, token: token)
-        Task { await tessie.updateCredentials(vin: vin, token: token) }
+        Task {
+            await tessie.updateCredentials(vin: vin, token: token)
+            _ = try? await tessie.state(forceFresh: true)   // immediate validation poll
+        }
+    }
+
+    func tessieStatus() async -> TessieClient.ConnectionStatus {
+        await tessie.currentStatus()
     }
 
     private func wire(config: RunConfig) {
