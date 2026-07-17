@@ -29,13 +29,23 @@ public struct EnergyModel: Sendable {
         return min(4.5, base) + hvacBiasKW
     }
 
+    /// Wet-road rolling multiplier: water displacement + film drag. Drizzle
+    /// ≈ +8-10%, heavy rain capped at +30% on the rolling term (≈ +8-12%
+    /// total consumption, matching observed EV wet-weather penalties).
+    public func wetRoadFactor(precipMmPerHour p: Double) -> Double {
+        guard p > 0.05 else { return 1.0 }
+        return 1 + min(0.30, 0.08 + 0.05 * p)
+    }
+
     /// Instantaneous tractive + hotel power in kW at speed v (m/s).
     public func powerKW(speedMps v: Double, gradePercent: Double,
-                        headwindMps: Double, tempC: Double, altitudeM: Double) -> Double {
+                        headwindMps: Double, tempC: Double, altitudeM: Double,
+                        precipMmPerHour: Double = 0) -> Double {
         let rho = airDensity(tempC: tempC, altitudeM: altitudeM)
         let vAir = max(0, v + headwindMps)
         let aero = 0.5 * rho * cdAEffective * vAir * vAir * v
         let crr = crrEffective * (tempC < 5 ? 1.12 : 1.0)   // cold tires/grease
+            * wetRoadFactor(precipMmPerHour: precipMmPerHour)
         let rolling = massKg * 9.81 * crr * v
         let grade = massKg * 9.81 * (gradePercent / 100) * v
         let tractive: Double
@@ -61,7 +71,8 @@ public struct EnergyModel: Sendable {
             let grade = Double(e1 - e0) / step * 100
             let p = powerKW(speedMps: leg.avgSpeedMps, gradePercent: grade,
                             headwindMps: leg.wind.headwindMps,
-                            tempC: leg.ambientTempC, altitudeM: Double(e0))
+                            tempC: leg.ambientTempC, altitudeM: Double(e0),
+                            precipMmPerHour: leg.precipMmPerHour)
             kWh += max(0.0, p) * (step / leg.avgSpeedMps) / 3600
         }
         // Wind sensitivity: dE/dw ≈ ρ·CdA·(v+w)·v · distance

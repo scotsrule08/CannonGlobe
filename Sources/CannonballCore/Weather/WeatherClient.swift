@@ -10,6 +10,7 @@ public struct WeatherClient: Sendable {
         public var crosswindMps: Double
         public var sigmaMps: Double
         public var ambientC: Double
+        public var precipMmPerHour: Double
     }
 
     public struct SamplePoint: Sendable {
@@ -35,7 +36,7 @@ public struct WeatherClient: Sendable {
         comps.queryItems = [
             .init(name: "latitude", value: points.map { String(format: "%.3f", $0.lat) }.joined(separator: ",")),
             .init(name: "longitude", value: points.map { String(format: "%.3f", $0.lon) }.joined(separator: ",")),
-            .init(name: "hourly", value: "temperature_2m,wind_speed_10m,wind_direction_10m,wind_gusts_10m"),
+            .init(name: "hourly", value: "temperature_2m,wind_speed_10m,wind_direction_10m,wind_gusts_10m,precipitation"),
             .init(name: "wind_speed_unit", value: "ms"),
             .init(name: "forecast_days", value: "2"),
         ]
@@ -64,7 +65,8 @@ public struct WeatherClient: Sendable {
             let sigma = 1.2 + max(0, gust - speed) * 0.35
             return PointForecast(mile: points[i].mile, headwindMps: head,
                                  crosswindMps: cross, sigmaMps: sigma,
-                                 ambientC: dto.hourly.temperature2m[hour])
+                                 ambientC: dto.hourly.temperature2m[hour],
+                                 precipMmPerHour: dto.hourly.precipitation[hour])
         }
     }
 }
@@ -75,11 +77,13 @@ struct OpenMeteoDTO: Decodable {
         var windSpeed10m: [Double]
         var windDirection10m: [Double]
         var windGusts10m: [Double]
+        var precipitation: [Double]
         enum CodingKeys: String, CodingKey {
             case temperature2m = "temperature_2m"
             case windSpeed10m = "wind_speed_10m"
             case windDirection10m = "wind_direction_10m"
             case windGusts10m = "wind_gusts_10m"
+            case precipitation
         }
     }
     var hourly: Hourly

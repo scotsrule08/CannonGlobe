@@ -113,6 +113,47 @@ public final class AppModel {
         UserDefaults.standard.set(destination.longitude, forKey: "trip.lon")
         lastPlanSOC = -100; lastPlanAt = .distantPast
         if let s = latestState { maybeReplan(s) }
+        Task { [weak self] in await self?.enrichTripEnvironment() }
+    }
+
+    /// Background enrichment after a trip starts: dense terrain profile
+    /// (~8 mi sampling) plus the first weather fetch. The corridor works
+    /// immediately from site-elevation anchors; this sharpens it.
+    private func enrichTripEnvironment() async {
+        guard var trip = activeTrip else { return }
+        let sampled = stride(from: 0, to: trip.points.count, by: 16).map { trip.points[$0] }
+        if sampled.count >= 2,
+           let elevations = try? await ElevationClient.elevations(
+               latitudes: sampled.map(\.latitude), longitudes: sampled.map(\.longitude)),
+           elevations.count == sampled.count {
+            trip.applyElevation(zip(sampled, elevations).map { ($0.mile, $1) })
+            guard activeTrip?.destinationName == trip.destinationName else { return }
+            activeTrip = trip
+        }
+        await refreshTripWeather()
+        lastPlanAt = .distantPast   // replan with the enriched physics
+        if let s = latestState { maybeReplan(s) }
+    }
+
+    /// Forecast wind/temp/rain along the route at each point's predicted
+    /// arrival hour, and hand it to the corridor's leg builder.
+    private func refreshTripWeather() async {
+        guard let snapshot = activeTrip else { return }
+        let points = snapshot.weatherSamplePoints()
+        guard !points.isEmpty else { return }
+        let currentMile = latestState.map { snapshot.mile(of: $0.coordinate.value) } ?? 0
+        let mph = max(30, snapshot.avgSpeedMps * 2.237)
+        let hoursAhead = points.map { max(0, min(40, Int(($0.mile - currentMile) / mph))) }
+        guard let rows = try? await weather.forecast(points: points, hoursAhead: hoursAhead)
+        else { return }
+        guard var trip = activeTrip, trip.destinationName == snapshot.destinationName
+        else { return }
+        trip.applyWeather(rows.map {
+            .init(mile: $0.mile, headwindMps: $0.headwindMps, crosswindMps: $0.crosswindMps,
+                  sigmaMps: $0.sigmaMps, ambientC: $0.ambientC,
+                  precipMmPerHour: $0.precipMmPerHour)
+        })
+        activeTrip = trip
     }
 
     public func endTrip() {
@@ -450,8 +491,10 @@ public final class AppModel {
             if let nearby = try? await tessie.nearbyChargingSites() {
                 applyOccupancy(nearby)
             }
-            // Weather hourly
-            if tick % 40 == 0 {
+            // Weather hourly — trip corridor when active, seed otherwise.
+            if tick % 40 == 0, activeTrip != nil {
+                await refreshTripWeather()
+            } else if tick % 40 == 0 {
                 let points = sites.map {
                     WeatherClient.SamplePoint(mile: $0.routeMile, lat: $0.coordinate.latitude,
                                               lon: $0.coordinate.longitude, routeBearingDeg: 260)

@@ -34,6 +34,7 @@ public struct RouteLeg: Codable, Sendable, Identifiable {
     public var elevation: ElevationProfile
     public var wind: WindForecast
     public var ambientTempC: Double
+    public var precipMmPerHour: Double          // 0 = dry road
     public var trafficDriveSeconds: Double      // MapKit traffic-aware ETA
     public var avgSpeedMps: Double
 
@@ -47,13 +48,15 @@ public struct RouteLeg: Codable, Sendable, Identifiable {
 
     public init(fromSiteID: String, toSiteID: String, distanceMi: Double,
                 elevation: ElevationProfile, wind: WindForecast, ambientTempC: Double,
+                precipMmPerHour: Double = 0,
                 trafficDriveSeconds: Double, avgSpeedMps: Double,
                 predictedKWh: Double = 0, predictedSigmaKWh: Double = 0,
                 requiredDepartureSOC: Double = 0, predictedArrivalSOC: Double = 0) {
         self.id = "\(fromSiteID)->\(toSiteID)"
         self.fromSiteID = fromSiteID; self.toSiteID = toSiteID
         self.distanceMi = distanceMi; self.elevation = elevation; self.wind = wind
-        self.ambientTempC = ambientTempC; self.trafficDriveSeconds = trafficDriveSeconds
+        self.ambientTempC = ambientTempC; self.precipMmPerHour = precipMmPerHour
+        self.trafficDriveSeconds = trafficDriveSeconds
         self.avgSpeedMps = avgSpeedMps; self.predictedKWh = predictedKWh
         self.predictedSigmaKWh = predictedSigmaKWh
         self.requiredDepartureSOC = requiredDepartureSOC

@@ -17,8 +17,62 @@ public struct RouteCorridor: Sendable {
     public var sites: [Supercharger]
     public var points: [RoutePoint]
     public var avgSpeedMps: Double
-    /// (routeMile, elevationM) anchors taken from charger site elevations.
+    /// (routeMile, elevationM) anchors — site elevations at build time,
+    /// replaced by a dense terrain profile once ElevationClient returns.
     var elevationAnchors: [(Double, Double)]
+
+    public struct WeatherAnchor: Sendable {
+        public var mile: Double
+        public var headwindMps: Double
+        public var crosswindMps: Double
+        public var sigmaMps: Double
+        public var ambientC: Double
+        public var precipMmPerHour: Double
+        public init(mile: Double, headwindMps: Double, crosswindMps: Double,
+                    sigmaMps: Double, ambientC: Double, precipMmPerHour: Double) {
+            self.mile = mile; self.headwindMps = headwindMps
+            self.crosswindMps = crosswindMps; self.sigmaMps = sigmaMps
+            self.ambientC = ambientC; self.precipMmPerHour = precipMmPerHour
+        }
+    }
+    /// Live forecast along the route; empty until the first weather refresh.
+    public private(set) var weatherAnchors: [WeatherAnchor] = []
+
+    public mutating func applyWeather(_ anchors: [WeatherAnchor]) {
+        weatherAnchors = anchors.sorted { $0.mile < $1.mile }
+    }
+
+    /// Swap in a dense terrain profile (mile, elevationM), replacing the
+    /// site-interpolated anchors.
+    public mutating func applyElevation(_ anchors: [(Double, Double)]) {
+        guard anchors.count >= 2 else { return }
+        elevationAnchors = anchors.sorted { $0.0 < $1.0 }
+    }
+
+    /// Sample points for weather fetches: every ~40 mi with local bearing.
+    public func weatherSamplePoints(everyMi: Double = 40) -> [WeatherClient.SamplePoint] {
+        var samples: [WeatherClient.SamplePoint] = []
+        var nextMile = 0.0
+        for (i, p) in points.enumerated() where p.mile >= nextMile {
+            let ahead = points[min(i + 1, points.count - 1)]
+            let bearing = Self.bearingDeg(fromLat: p.latitude, fromLon: p.longitude,
+                                          toLat: ahead.latitude, toLon: ahead.longitude)
+            samples.append(.init(mile: p.mile, lat: p.latitude, lon: p.longitude,
+                                 routeBearingDeg: bearing))
+            nextMile = p.mile + everyMi
+        }
+        return samples
+    }
+
+    static func bearingDeg(fromLat: Double, fromLon: Double,
+                           toLat: Double, toLon: Double) -> Double {
+        let φ1 = fromLat * .pi / 180, φ2 = toLat * .pi / 180
+        let Δλ = (toLon - fromLon) * .pi / 180
+        let y = sin(Δλ) * cos(φ2)
+        let x = cos(φ1) * sin(φ2) - sin(φ1) * cos(φ2) * cos(Δλ)
+        let θ = atan2(y, x) * 180 / .pi
+        return (θ + 360).truncatingRemainder(dividingBy: 360)
+    }
 
     // MARK: build
 
@@ -133,24 +187,43 @@ public struct RouteCorridor: Sendable {
         return best
     }
 
-    /// Leg builder for the DP planner: distance and time from the route's
-    /// average speed, elevation linearly interpolated between site anchors.
-    public func legBuilder(ambientTempC: Double) -> TripPlanner.LegBuilder {
-        let anchors = elevationAnchors
-        let speed = max(10, avgSpeedMps)
+    /// Leg builder for the DP planner: elevation from the terrain anchors,
+    /// wind/temp/rain interpolated from the live forecast at the leg
+    /// midpoint. Rain slows the leg (~3%/mm·h, capped 15%) on top of the
+    /// energy model's wet-road penalty.
+    public func legBuilder(ambientTempC defaultAmbientC: Double) -> TripPlanner.LegBuilder {
+        let elevAnchors = elevationAnchors
+        let weather = weatherAnchors
+        let baseSpeed = max(10, avgSpeedMps)
         return { from, to in
             let miles = max(0.1, to - from)
             let n = max(2, min(64, Int(miles / 5) + 2))
             let elevations = (0..<n).map { i in
                 Float(ChargeCurveModel.interpolate(
-                    anchors, at: from + miles * Double(i) / Double(n - 1)))
+                    elevAnchors, at: from + miles * Double(i) / Double(n - 1)))
             }
+            let mid = (from + to) / 2
+            var wind = WindForecast(headwindMps: 0, crosswindMps: 0)
+            var ambient = defaultAmbientC
+            var precip = 0.0
+            if !weather.isEmpty {
+                func at(_ keyPath: KeyPath<WeatherAnchor, Double>) -> Double {
+                    ChargeCurveModel.interpolate(weather.map { ($0.mile, $0[keyPath: keyPath]) }, at: mid)
+                }
+                wind = WindForecast(headwindMps: at(\.headwindMps),
+                                    crosswindMps: at(\.crosswindMps),
+                                    sigmaMps: at(\.sigmaMps))
+                ambient = at(\.ambientC)
+                precip = max(0, at(\.precipMmPerHour))
+            }
+            let speed = baseSpeed * (1 - min(0.15, precip * 0.03))
             return RouteLeg(
                 fromSiteID: "", toSiteID: "", distanceMi: miles,
                 elevation: ElevationProfile(stepMeters: miles * 1609.34 / Double(n - 1),
                                             elevationsM: elevations),
-                wind: WindForecast(headwindMps: 0, crosswindMps: 0),
-                ambientTempC: ambientTempC,
+                wind: wind,
+                ambientTempC: ambient,
+                precipMmPerHour: precip,
                 trafficDriveSeconds: miles * 1609.34 / speed,
                 avgSpeedMps: speed)
         }

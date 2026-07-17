@@ -65,6 +65,53 @@ final class RouteCorridorTests: XCTestCase {
         XCTAssertFalse(leg.elevation.elevationsM.isEmpty)
     }
 
+    func testWeatherAnchorsFlowIntoLegs() throws {
+        let dryCorridor = try XCTUnwrap(build())
+        var wetCorridor = dryCorridor
+        wetCorridor.applyWeather([
+            .init(mile: 0, headwindMps: 8, crosswindMps: 2, sigmaMps: 1.5,
+                  ambientC: 10, precipMmPerHour: 4),
+            .init(mile: wetCorridor.destinationMile, headwindMps: 8, crosswindMps: 2,
+                  sigmaMps: 1.5, ambientC: 10, precipMmPerHour: 4),
+        ])
+        let dryLeg = dryCorridor.legBuilder(ambientTempC: 22)(100, 200)
+        let wetLeg = wetCorridor.legBuilder(ambientTempC: 22)(100, 200)
+        XCTAssertEqual(wetLeg.wind.headwindMps, 8, accuracy: 0.1)
+        XCTAssertEqual(wetLeg.precipMmPerHour, 4, accuracy: 0.1)
+        XCTAssertEqual(wetLeg.ambientTempC, 10, accuracy: 0.5)
+        XCTAssertGreaterThan(wetLeg.trafficDriveSeconds, dryLeg.trafficDriveSeconds * 1.08,
+                             "heavy rain must slow the leg")
+        let energy = EnergyModel()
+        XCTAssertGreaterThan(energy.predict(leg: wetLeg).kWh,
+                             energy.predict(leg: dryLeg).kWh * 1.15,
+                             "headwind + rain + cold must cost real energy")
+    }
+
+    func testElevationOverrideReplacesSiteAnchors() throws {
+        var corridor = try XCTUnwrap(build())
+        // Flat site anchors → inject a real 2,000 m climb over 50 mi
+        // (≈2.5% grade, Eisenhower-approach territory).
+        corridor.applyElevation([(0, 300), (50, 300), (100, 2300), (566, 300)])
+        let climb = corridor.legBuilder(ambientTempC: 22)(50, 100)
+        let flat = corridor.legBuilder(ambientTempC: 22)(0, 50)
+        XCTAssertGreaterThan(climb.elevation.totalClimbM, 500)
+        let energy = EnergyModel()
+        let climbPerMi = energy.predict(leg: climb).kWh / climb.distanceMi
+        let flatPerMi = energy.predict(leg: flat).kWh / flat.distanceMi
+        XCTAssertGreaterThan(climbPerMi, flatPerMi * 1.1,
+                             "climbing legs must predict higher consumption")
+    }
+
+    func testRainRaisesConsumptionBounded() {
+        let energy = EnergyModel()
+        let dry = energy.powerKW(speedMps: 31, gradePercent: 0, headwindMps: 0,
+                                 tempC: 20, altitudeM: 300)
+        let wet = energy.powerKW(speedMps: 31, gradePercent: 0, headwindMps: 0,
+                                 tempC: 20, altitudeM: 300, precipMmPerHour: 5)
+        XCTAssertGreaterThan(wet, dry * 1.03, "rain must cost something")
+        XCTAssertLessThan(wet, dry * 1.20, "wet penalty must stay physical")
+    }
+
     func testPlannerSolvesDynamicCorridor() throws {
         let corridor = try XCTUnwrap(build())
         let pack = PackProfile.us2025PremiumRWD
