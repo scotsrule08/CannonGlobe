@@ -108,7 +108,11 @@ public final class AppModel {
     private func maybeReplan(_ state: VehicleState) {
         let socDrift = abs(state.socPercent.value - lastPlanSOC)
         let age = Date().timeIntervalSince(lastPlanAt)
-        guard socDrift > 1.5 || age > 300 else { return }
+        // Off-corridor refresh is a cheap passthrough of car data — keep the
+        // ETA fresh; the full DP replan keeps the 5-minute cadence.
+        let maxAge = nearestSiteDistanceMi(of: state.coordinate.value)
+            > Self.offCorridorThresholdMi ? 15.0 : 300.0
+        guard socDrift > 1.5 || age > maxAge else { return }
         lastPlanSOC = state.socPercent.value
         lastPlanAt = .init()
         replanTask?.cancel()
