@@ -8,7 +8,7 @@
   flaky, the whole fusion layer degrades to Tessie-primary and thresholds
   loosen — decide early.
 - Day-0 capacity calibration charge (20→80%) + pack-chemistry signature check
-  (§1.1) — confirms the 62.4 kWh nickel profile numbers on the actual car.
+  (§1.1) — confirms the 79 kWh NCA profile numbers on the actual car.
 - Record two highway calibration drives (100+ mi) to seed the efficiency
   learner.
 

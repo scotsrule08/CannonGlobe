@@ -1,85 +1,77 @@
-# 1 · Battery Specification & Charge-Curve Model — 2025 Model 3 RWD (US)
+# 1 · Battery Specification & Charge-Curve Model — 2025 Model 3 Premium RWD (US)
 
-## 1.1 Which pack this car actually has (and why it matters)
+## 1.1 The exact pack in this car
 
-The single most important research finding for this project: **the 2025
-US-built (Fremont) Model 3 RWD does not use the CATL LFP pack** that base RWD
-Model 3s use in China/Europe and that pre-Highland US RWDs (2021–2023) used.
-Tariff and import restrictions on Chinese-made LFP packs pushed Tesla to fit
-US RWD cars with a **software-range-locked nickel-based (Panasonic 2170
-NCA/NMC-family) pack** — physically the Long Range pack hardware, capacity- and
-power-limited in firmware.
+Target vehicle: **2025 Tesla Model 3 Premium RWD** (US variant — the
+higher-trim single-motor RWD formerly badged Long Range RWD, from ~$42,490,
+**363 mi EPA**). Its pack:
 
-Spec sheets on aggregator sites (EV Database "CATL LFP60" / "CATL 6M" entries)
-describe the **export-market** car. Do not use them for this vehicle. Equally,
-do not use unlocked Long Range numbers (78 kWh usable / 250 kW peak): the lock
-changes both capacity and the power-vs-*indicated*-SOC curve.
+- **Chemistry**: nickel-cobalt-aluminum (NCA) lithium-ion, cylindrical
+  **Panasonic 2170** cells, US-built pack.
+- **Usable capacity: 79 kWh** (~82 kWh nominal/gross).
+- **Peak DC fast charge: 250 kW** (vehicle-limited; V3/V4 sites deliver it).
+- AC onboard charging ≈ 11.5 kW (irrelevant to the run).
 
-### Hard-coded pack profile (`PackProfile.us2025RWDNickel`)
+Two traps this spec explicitly avoids:
+
+1. **Base "Standard/RWD" numbers do not apply.** The $36k-class RWD trims use
+   smaller packs (imported CATL LFP in most markets; capacity-limited packs in
+   some US builds) with a 170 kW cap. Aggregator entries like EV Database's
+   "CATL LFP60"/"CATL 6M" describe those cars, not this one.
+2. **LFP planning heuristics do not apply.** No flat-OCV SOC drift, no
+   charge-to-100%-periodically requirement, and a very different power curve.
+
+### Hard-coded pack profile (`PackProfile.us2025PremiumRWD`)
 
 | Parameter | Value | Confidence / source of truth |
 |---|---|---|
-| Chemistry | Nickel-based (Panasonic 2170, NCA/NCMA family) | High — locked pack, US sourcing |
-| Gross hardware capacity | ~78–79 kWh (LR pack hardware) | High |
-| **Usable (locked) capacity** | **62.4 kWh** | Medium-high (owner OBD/BMS reads; TMC "new 62.4 kWh battery") — **calibrated live from BMS on day 0, see §1.5** |
-| Pack architecture | 96s46p-class, 400 V class | High |
-| Nominal voltage | ~346 V (3.6 V/cell × 96s) | High |
-| Max voltage (locked full) | ~390–395 V (locked "100%" ≈ ~80% true cell SOC) | Medium |
-| Nameplate peak DC power | 170 kW (Tesla spec for RWD trim) | High |
-| Peak DC current | ~500 A class at low SOC | Medium |
-| AC onboard charger | 11.5 kW (48 A) | High |
-| EPA rated range (2025 US RWD) | 272 mi | High |
-| Rated consumption | ≈ 229 Wh/mi (62.4 kWh ÷ 272 mi) | Derived |
+| Chemistry | NCA (Panasonic 2170, cylindrical) | High |
+| Gross capacity | ~82 kWh | High |
+| **Usable capacity** | **79 kWh** | High — still **calibrated live from BMS on day 0, §1.5** (real-world packs read 77–79 depending on build/degradation) |
+| Pack architecture | 96s, 400 V class, 4416 cells | High |
+| Nominal voltage | ~346 V (3.6 V/cell × 96s); ~403 V at full | High |
+| Nameplate peak DC power | 250 kW | High |
+| Peak DC current | ~630 A class at low SOC on V3 | Medium |
+| EPA rated range | 363 mi | High |
+| Rated consumption | ≈ 218 Wh/mi (79 kWh ÷ 363 mi) | Derived |
 
 ### LFP fallback profile (`PackProfile.lfp60`)
 
-Kept in code for completeness and because VIN/firmware detection must be
-verified against *this* physical car on day 0 (a small number of early-2025 US
-RWD builds may carry over CATL LFP60 stock): 60.9 kWh gross / 57.5 kWh usable,
-prismatic CATL LFP, ~360 V class, 170 kW peak with a flatter but
-earlier-tapering curve, and the classic LFP property that **BMS SOC drifts
-badly without periodic 100% charges** (flat OCV curve). The app selects the
-profile at startup from BMS pack-voltage-at-SOC signature (LFP ≈ 3.2 V/cell
-nominal vs ~3.6 V/cell nickel — unambiguous from CAN pack voltage ÷ 96).
-
-### Why the locked nickel pack is a strategic gift for a cannonball
-
-Displayed SOC is rescaled over the locked window. Indicated 100% ≈ ~80% true
-cell SOC, indicated 0% ≈ ~0–3% true. Consequences the optimizer exploits:
-
-1. **The taper vs indicated SOC is gentler than an unlocked car's.** The cell
-   is at lower true SOC than the display suggests, so high power holds deeper
-   into the indicated range.
-2. **Charging to indicated 100% is not the disaster it is on an unlocked NCA
-   pack** — the terminal taper still slows things, but there is no 80→100%
-   "half-hour for 20%" cliff. Legs can therefore be planned with higher
-   departure SOC when stop spacing demands it.
-3. **Low-end buffer**: arriving at indicated 2–3% is less risky than on LFP
-   (accurate SOC estimation on nickel chemistry, real bottom buffer), which
-   lets the safety buffer be tighter — minutes saved at every stop.
+Retained in code purely as a safety net: the app verifies chemistry on day 0
+from the CAN pack-voltage-at-SOC signature (NCA ≈ 3.5–3.7 V/cell mid-SOC vs
+LFP pinned near 3.3 V — unambiguous from pack voltage ÷ 96). If a fleet swap
+or spec surprise ever puts an LFP car under this app, the planner flips
+profiles (57.5 kWh usable, 170 kW peak, flatter-earlier taper, bigger SOC
+floor for BMS drift) without code changes.
 
 ## 1.2 Base charge curve (25 °C cell, unshared V3/V4 stall)
 
-Priors, encoded as a monotone-interpolated table of **indicated SOC → kW**.
-These are *starting* values, blended with live-observed residuals (§1.5).
+Priors, encoded as a monotone-interpolated table of **SOC → kW**, blended with
+live-observed residuals (§1.5). This is the classic aggressive Tesla NCA
+taper: a short, tall peak and a long slide.
 
-| Ind. SOC % | 0 | 5 | 10 | 15 | 20 | 25 | 30 | 40 | 50 | 60 | 70 | 80 | 90 | 97 | 100 |
+| SOC % | 0 | 5 | 10 | 15 | 20 | 25 | 30 | 40 | 50 | 60 | 70 | 80 | 90 | 97 | 100 |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| kW | 120 | 165 | 170 | 170 | 170 | 168 | 162 | 148 | 130 | 110 | 90 | 68 | 48 | 28 | 8 |
+| kW | 130 | 240 | 250 | 235 | 200 | 180 | 160 | 132 | 108 | 90 | 74 | 58 | 38 | 22 | 5 |
 
-Notes:
-- 0–5% ramp reflects handshake + current ramp, not a battery limit.
-- The 10–25% plateau at the 170 kW firmware cap is the money zone: **arrive
-  low**. Average power 10→60% ≈ 145 kW; 10→80% ≈ 130 kW-class.
-- The taper is roughly linear from ~30% — characteristic Tesla nickel behavior,
-  stretched rightward by the SOC rescaling of the lock.
+Consequences the optimizer is built around:
+
+- **The 250 kW peak is brief (~5–15%) — arriving low is worth real minutes.**
+  Every % of SOC you arrive with above ~10% is energy you bought at 60–130 kW
+  that you could have bought at 200–250 kW.
+- Average power 10→50% ≈ 175 kW; 10→60% ≈ 160 kW; 10→80% ≈ 125 kW
+  (10→80% ≈ 27–28 min for 55.3 kWh). **Above ~60% the marginal minute buys
+  less than half what it buys at 15%** — the dynamic SOC target (§3.3) exists
+  to exploit exactly this.
+- Charging past ~80% is almost never optimal on this run; past 90% only when
+  a single long gap demands it (the DP decides, not a rule of thumb).
 - Time-to-SOC integration uses `dt = capacity × dSOC / P(SOC)` on a 0.5% grid.
 
 ## 1.3 Temperature modifier
 
 Charge power = `min(vehicleCurve(SOC) × f_temp(T_cell), siteCap, bmsRequestKW)`.
 
-`f_temp` on **max cell temp** for hot limits and **min cell temp** for cold
+`f_temp` uses **min cell temp** for cold limits and **max cell temp** for hot
 limits (the BMS limits on the worst cell; S3XY gives us both):
 
 | Min cell °C | ≤ −10 | 0 | 10 | 20 | 25–45 | — |
@@ -90,50 +82,61 @@ limits (the BMS limits on the worst cell; S3XY gives us both):
 |---|---|---|---|---|---|
 | Hot factor | 1.00 | 0.85 | 0.60 | 0.40 | |
 
-- Ideal arrival window: **≈ 40–50 °C max cell** for peak acceptance at low SOC.
+- Ideal arrival window: **≈ 40–50 °C max cell** for full 250 kW acceptance at
+  low SOC — a cold-soaked pack takes a >2× time penalty on the peak zone, so
+  preconditioning matters *more* on this pack than on a 170 kW-capped one.
 - Preconditioning target: the app times precondition-start so predicted
-  arrival cell temp lands in that window (model: pack heats ~0.5–0.8 °C/min
-  while preconditioning at highway speed, less in extreme cold; learned live).
-- Back-to-back fast legs in desert heat (I-15/I-10 in summer) flip the
-  problem: the hot factor bites, and the app recommends *against*
-  preconditioning and may prefer slightly longer, cooler charge stops.
+  arrival cell temp lands in that window (pack heats ~0.5–0.8 °C/min while
+  preconditioning at highway speed; learned live).
+- Desert heat flips it: repeated 250 kW sessions push cells toward the hot
+  taper; the planner spaces high-power stops and the watchdog distinguishes
+  THERMAL (stay) from BAD STALL (move).
 
 ## 1.4 Supercharger version modifier (site cap)
 
 | Version | Cabinet cap per car | Sharing behavior |
 |---|---|---|
-| V2 (150 kW) | 150 kW | **Paired stalls (1A/1B)** split a cabinet; a neighbor can halve you. Watchdog + stall-choice logic critical. |
+| V2 (150 kW) | 150 kW | **Paired stalls (1A/1B)** split a cabinet; a neighbor can halve you. |
 | V2 urban | 72 kW | Never acceptable on this run except emergencies. |
-| V3 | 250 kW | No pairing; site-level power can still sag at full occupancy. |
+| V3 | 250 kW | No pairing; site power can still sag at full occupancy. |
 | V4 stall / V3 cabinet | 250 kW | As V3; longer cables (irrelevant here). |
-| True V4 cabinet | 325+ kW | No benefit to this car (170 kW vehicle cap) but implies healthy site power budget. |
+| True V4 cabinet | 325+ kW | No headroom benefit (car caps at 250 kW) but implies a healthy site power budget. |
 
-For this car the vehicle cap (170 kW) binds at V3+; **V2 sites still deliver
-~148–150 kW**, so a perfectly-placed V2 is only ~8–12% slower at low SOC and
-can beat a V3 with a longer detour — the scorer treats version as an input to
-expected power, never as a hard filter. Stall-pairing metadata is used at V2
-sites to recommend an unpaired stall on arrival.
+Unlike a 170 kW-capped car, **this pack leaves ~100 kW on the table at V2
+sites in the peak zone** — the scorer's expected-power model makes V2 sites
+genuinely expensive below ~40% SOC, so a modest extra detour to a V3 usually
+wins. Above ~55% SOC the curve is under 100 kW anyway and V2 stops become
+competitive again; the DP finds these crossovers, never a version filter.
+Stall-pairing metadata still drives unpaired-stall recommendations when a V2
+is chosen.
 
 ## 1.5 Live calibration & residual learning
 
-1. **Day-0 capacity calibration**: from CAN, integrate `V × I` over a
-   20→80% charge and scale against ΔSOC to correct usable-kWh (also
-   cross-checked against Tessie's reported added kWh).
+1. **Day-0 capacity calibration**: from CAN, integrate `V × I` over a 20→80%
+   charge and scale against ΔSOC to correct usable-kWh (cross-checked against
+   Tessie's reported added kWh and `BMS_energyStatus` full-pack value).
 2. **Curve residuals**: during every DC session, store `(SOC, T_cell,
    siteVersion, expectedKW, actualKW)` samples. An exponentially-weighted
    residual spline (keyed by SOC decile) adjusts the prior curve for *this*
-   car — degradation, firmware changes, and lock behavior all wash into it.
+   car — degradation, firmware changes, and battery-day variance wash into it.
 3. **Watchdog separation of concerns**: residual learning updates only from
    sessions judged "healthy" (no sharing suspected, thermal factor ≈ 1);
    otherwise a bad stall would teach the model to expect bad stalls.
 
 ## 1.6 Practical planning constants for the run
 
-- Planning SOC window: **arrive 8–12%, depart 55–65%** for most legs
-  (average charge power maximized); depart higher only when stop spacing
-  (e.g., Green River → Vegas gaps on I-70/I-15) demands it.
-- Buffer policy: dynamic (see decision-engine doc §3.3), floor at 6% indicated
-  arrival under worst-case headwind forecast error.
-- ~14–16 stops expected over ~2,790 mi at FSD highway speeds; total charge time
-  is the dominant controllable variable (~4.5–6 h), which is why per-stop
-  optimization is the app's core mission.
+- Planning SOC window: **arrive 5–10%, depart 45–60%** for most legs — the
+  aggressive taper makes many short charges strictly faster than few long
+  ones, within stall-overhead limits (~45 s handshake + off/on-ramp time
+  bounds how short a stop can profitably be).
+- Buffer policy: dynamic (decision-engine doc §3.3), floor at 5% arrival
+  under worst-case headwind forecast error (NCA SOC estimation is accurate;
+  no LFP-style drift margin needed).
+- ~9–11 stops expected over ~2,790 mi at FSD highway speeds; total charge
+  time ≈ 3.5–4.5 h and is the dominant controllable variable — which is why
+  per-stop optimization is the app's core mission.
+- 363 mi rated range means theoretical 300+ mi legs exist, but the DP will
+  rarely choose them: driving deep into the buffer then charging through the
+  taper loses to an extra short stop in the peak zone almost everywhere the
+  corridor offers dense site spacing (I-80/I-70 gaps in WY/UT are the
+  exceptions the DP handles explicitly).

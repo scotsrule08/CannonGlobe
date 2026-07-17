@@ -21,8 +21,8 @@ P_i = [ ½·ρ(T,alt)·Cd·A·(v + w_head)²·v      // aero, headwind-corrected
 E_leg = Σ P_i·dt_i, with σ_leg from wind-forecast error + model residual σ
 ```
 
-Constants seeded for the 2025 RWD Highland (Cd 0.219, A 2.2 m², m 1765 kg +
-payload, Crr 0.009 @20 °C) then **overridden by the EfficiencyLearner** (§3.6),
+Constants seeded for the 2025 Premium RWD Highland (Cd 0.219, A 2.2 m², m
+1780 kg + payload, Crr 0.009 @20 °C) then **overridden by the EfficiencyLearner** (§3.6),
 which is what makes the model *this car on FSD*, not a spec sheet.
 
 ## 3.2 Trip-plan optimizer (corridor DP)

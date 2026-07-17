@@ -15,14 +15,14 @@ final class SOCTargetTests: XCTestCase {
     }
 
     var calc: SOCTargetCalculator {
-        SOCTargetCalculator(pack: .us2025RWDNickel, energy: EnergyModel())
+        SOCTargetCalculator(pack: .us2025PremiumRWD, energy: EnergyModel())
     }
 
     func testShortLegNeverAsksForEighty() {
         let t = calc.target(nextLeg: flatLeg(miles: 90))
-        XCTAssertLessThan(t.departureSOC, 60,
+        XCTAssertLessThan(t.departureSOC, 50,
             "a 90-mi flat leg must not demand a high charge — this is the whole point")
-        XCTAssertGreaterThanOrEqual(t.predictedArrivalSOC, 6)
+        XCTAssertGreaterThanOrEqual(t.predictedArrivalSOC, 5)
     }
 
     func testHeadwindRaisesTarget() {

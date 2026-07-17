@@ -6,7 +6,7 @@ public struct EnergyModel: Sendable {
     // Learner-adjusted effective parameters
     public var cdAEffective: Double = 0.219 * 2.22    // m² (Cd·A)
     public var crrEffective: Double = 0.009
-    public var massKg: Double = 1765 + 180            // car + driver/co-driver + gear
+    public var massKg: Double = 1780 + 180            // Premium RWD curb + driver/co-driver + gear
     public var drivetrainEfficiency: Double = 0.92
     public var regenEfficiency: Double = 0.65
     public var hvacBiasKW: Double = 0.0               // learner residual

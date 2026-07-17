@@ -2,11 +2,13 @@ import XCTest
 @testable import CannonballCore
 
 final class ChargeCurveTests: XCTestCase {
-    let model = ChargeCurveModel(profile: .us2025RWDNickel)
+    let model = ChargeCurveModel(profile: .us2025PremiumRWD)
 
-    func testPeakPowerInPlateauZone() {
-        let kW = model.vehicleExpectedKW(soc: 15, cellTempMinC: 30, cellTempMaxC: 35)
-        XCTAssertEqual(kW, 170, accuracy: 3, "10–25% warm pack should sit at the 170 kW cap")
+    func testPeakPowerAtLowSOC() {
+        let kW = model.vehicleExpectedKW(soc: 10, cellTempMinC: 30, cellTempMaxC: 35)
+        XCTAssertEqual(kW, 250, accuracy: 5, "warm pack at ~10% should hit the 250 kW peak")
+        let at20 = model.vehicleExpectedKW(soc: 20, cellTempMinC: 30, cellTempMaxC: 35)
+        XCTAssertLessThan(at20, 215, "NCA taper must already bite by 20% — the peak is brief")
     }
 
     func testTaperIsMonotonicAbovePlateau() {
@@ -20,12 +22,12 @@ final class ChargeCurveTests: XCTestCase {
 
     func testColdPackIsSeverelyLimited() {
         let cold = model.vehicleExpectedKW(soc: 15, cellTempMinC: 0, cellTempMaxC: 5)
-        XCTAssertLessThan(cold, 65, "0 °C cells must cut power to roughly a third")
+        XCTAssertLessThan(cold, 95, "0 °C cells must cut power to roughly a third")
     }
 
     func testSiteVersionCapsPower() {
         let v2 = model.expectedKW(soc: 15, cellTempMinC: 30, cellTempMaxC: 35, siteVersion: .v2)
-        XCTAssertEqual(v2, 150, accuracy: 1, "V2 cabinet caps below the vehicle's 170 kW")
+        XCTAssertEqual(v2, 150, accuracy: 1, "V2 cabinet caps well below the vehicle's 250 kW")
         let urban = model.expectedKW(soc: 15, cellTempMinC: 30, cellTempMaxC: 35, siteVersion: .v2urban)
         XCTAssertEqual(urban, 72, accuracy: 1)
     }
@@ -38,9 +40,9 @@ final class ChargeCurveTests: XCTestCase {
 
     func testTenToSixtyIsFastWindow() {
         let warm = model.secondsToCharge(from: 10, to: 60, cellTempStartC: (40, 44), siteVersion: .v3)
-        // 50% of 62.4 kWh at ~145 kW mean ≈ 13 min + overhead.
-        XCTAssertGreaterThan(warm / 60, 10)
-        XCTAssertLessThan(warm / 60, 18)
+        // 50% of 79 kWh (39.5 kWh) at ~155 kW mean ≈ 15 min + overhead.
+        XCTAssertGreaterThan(warm / 60, 12)
+        XCTAssertLessThan(warm / 60, 20)
         let toFull = model.secondsToCharge(from: 10, to: 100, cellTempStartC: (40, 44), siteVersion: .v3)
         XCTAssertGreaterThan(toFull, warm * 2.2,
             "top of the curve must be dramatically slower — this is why depart-SOC matters")
