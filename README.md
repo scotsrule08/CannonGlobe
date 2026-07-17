@@ -32,8 +32,36 @@ is a mission failure; the app optimizes ruthlessly for total door-to-door time.
 - **Dynamic SOC targets**: never "charge to 80%" — charge to the minimum SOC that reaches the next optimal stop with a physics-based buffer (elevation, wind, temp, observed FSD efficiency).
 - **Preconditioning intelligence** timed against arrival cell temperature, via Fleet API nav-to-SC trigger and (where exposed) Commander commands.
 
+## Building the app
+
+The repo is a Swift package (`CannonballCore` logic + `CannonballApp` UI). To
+produce the installable iOS app:
+
+1. In Xcode: **File → New → Project → iOS App** (name e.g. `CannonballShell`,
+   SwiftUI lifecycle), add this package as a local dependency, link
+   `CannonballApp`.
+2. Replace the generated `App` struct with:
+   ```swift
+   import CannonballApp
+   @main struct Shell: App { var body: some Scene { CannonballScene() } }
+   ```
+3. Add a **`Secrets.plist`** (never commit) with `TessieVIN` and `TessieToken`.
+4. Info.plist / capabilities (docs §2.6): `NSLocationAlwaysAndWhenInUseUsageDescription`,
+   `NSLocalNetworkUsageDescription`, background modes `location`, `audio`,
+   `processing`; request the Critical Alerts entitlement from Apple early.
+5. `swift test` runs the core suites (charge curve, SOC targets, trip planner)
+   on any Mac — no simulator needed.
+
+Pre-run data tasks (Phase 0, docs §5.1): regenerate `CorridorSeed` from
+supercharge.info + a real routing pass (every seed row ships `verified: false`
+and the app must not run the real event on unverified rows), bake the corridor
+elevation profile into `CorridorModel`, and run the day-0 CAN probe +
+capacity-calibration charge.
+
 ## Status
 
-Specification + core-architecture skeleton. See
-`docs/05-implementation-plan-and-edge-cases.md` for the build order targeting a
-run-ready MVP.
+Complete core implementation + app shell: fusion, charge-curve model with
+residual learning, corridor DP planner, watchdog, Nav challenger, weather,
+preconditioning, and all three screens. Remaining before the run: Xcode shell
+project, Phase-0 bench verification (Panda framing, CAN IDs), corridor data
+bake, and device testing. See `docs/05-implementation-plan-and-edge-cases.md`.

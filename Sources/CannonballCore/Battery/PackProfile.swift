@@ -20,12 +20,14 @@ public struct PackProfile: Sendable {
     public var bufferFloorSOC: Double
 
     /// 2025 US Model 3 Premium RWD (higher-trim single-motor, 363 mi EPA):
-    /// Panasonic 2170 NCA pack, 79 kWh usable / ~82 kWh gross, 250 kW peak.
-    /// See docs §1.1. usableKWh is a prior; day-0 calibration overwrites it.
+    /// Panasonic 2170 NCA pack, 79 kWh usable new / ~82 kWh gross, 250 kW peak.
+    /// THIS car has ~50k mi: prior assumes ~5% degradation → 75.0 kWh usable
+    /// and slightly earlier taper (residual learning absorbs the rest).
+    /// See docs §1.1/§1.7. usableKWh is a prior; day-0 calibration overwrites it.
     public static let us2025PremiumRWD = PackProfile(
-        name: "2025 M3 Premium RWD US (NCA 79 kWh)",
+        name: "2025 M3 Premium RWD US (NCA, 50k mi, ~75 kWh)",
         chemistry: .nickel,
-        usableKWh: 79.0,
+        usableKWh: 75.0,
         nominalVoltage: 346,
         peakDCkW: 250,
         baseCurve: [

@@ -11,10 +11,12 @@ public final class AlertEngine: NSObject {
 
     public override init() {
         super.init()
+        #if os(iOS)
         // .duckOthers so guidance rides over music without pausing it; the
         // audio background mode keeps the app alive while mounted.
         try? AVAudioSession.sharedInstance().setCategory(
             .playback, mode: .voicePrompt, options: [.duckOthers])
+        #endif
     }
 
     public func requestAuthorization() async {

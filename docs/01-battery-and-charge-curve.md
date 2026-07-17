@@ -28,6 +28,7 @@ Two traps this spec explicitly avoids:
 | Chemistry | NCA (Panasonic 2170, cylindrical) | High |
 | Gross capacity | ~82 kWh | High |
 | **Usable capacity** | **79 kWh** | High — still **calibrated live from BMS on day 0, §1.5** (real-world packs read 77–79 depending on build/degradation) |
+| **Usable at 50k mi (planning prior)** | **75.0 kWh** (~5% degradation, §1.7) | Medium — day-0 calibration is authoritative |
 | Pack architecture | 96s, 400 V class, 4416 cells | High |
 | Nominal voltage | ~346 V (3.6 V/cell × 96s); ~403 V at full | High |
 | Nameplate peak DC power | 250 kW | High |
@@ -140,3 +141,23 @@ is chosen.
   taper loses to an extra short stop in the peak zone almost everywhere the
   corridor offers dense site spacing (I-80/I-70 gaps in WY/UT are the
   exceptions the DP handles explicitly).
+
+## 1.7 Degradation at 50k miles
+
+The actual car has ~50,000 mi. NCA 2170 packs typically show 5–8% capacity
+fade in that window (fast early fade, then a plateau), so the planning prior
+is **75.0 kWh usable** (79 × 0.95) and effective rated range ≈ 345 mi.
+Operationally:
+
+- **Capacity**: the day-0 calibration charge (§1.5) measures the real number;
+  the 75.0 prior only has to be close enough that the *first* leg's plan is
+  sane. Tessie `battery_health` and `BMS_energyStatus` full-pack kWh provide
+  two independent cross-checks before the run.
+- **Charge power**: an aged pack accepts slightly less peak power and tapers
+  marginally earlier (rising internal resistance). We do not hand-tune the
+  curve for this — the per-decile residual learner converges on the true
+  curve within the first one or two charge stops, which is exactly what it's
+  for. Expect the learned curve to sit ~3–7% under the new-pack prior in the
+  30–70% range.
+- **Buffer math**: capacity uncertainty before calibration adds ±1.5% SOC to
+  the reserve via the σ term; after day-0 calibration it drops out.

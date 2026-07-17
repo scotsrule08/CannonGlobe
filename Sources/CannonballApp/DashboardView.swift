@@ -30,7 +30,9 @@ public struct DashboardView: View {
         }
         .padding(24)
         .persistentSystemOverlays(.hidden)
+        #if os(iOS)
         .onAppear { UIApplication.shared.isIdleTimerDisabled = true }
+        #endif
     }
 
     private var sourceBadge: some View {
