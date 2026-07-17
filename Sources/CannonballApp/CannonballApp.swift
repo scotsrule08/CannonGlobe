@@ -38,7 +38,7 @@ struct RootView: View {
             DriveScreen(model: model, dashboard: model.dashboard)
                 .tag(Tab.drive)
                 .tabItem { Label("Drive", systemImage: "road.lanes") }
-            ChargeScreenView(model: model.charge)
+            ChargeTabView(model: model)
                 .tag(Tab.charge)
                 .tabItem { Label("Charge", systemImage: "bolt.fill") }
             CarView(model: model)

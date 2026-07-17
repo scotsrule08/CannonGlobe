@@ -89,6 +89,41 @@ public final class AppModel {
         CarSnapshot(cloud: await tessie.latestCloudState(), pack: pack)
     }
 
+    // MARK: chart data
+
+    struct PlanProfile: Sendable {
+        struct Point: Identifiable, Sendable { var id: Int; var mile: Double; var soc: Double }
+        struct Stop: Identifiable, Sendable { var id: String; var mile: Double; var soc: Double; var name: String }
+        var points: [Point]
+        var stops: [Stop]
+    }
+
+    /// SOC-vs-distance sawtooth of the active plan, starting at the car's
+    /// current SOC ("miles from here" on the x axis).
+    func planProfile() -> PlanProfile? {
+        guard let solution = latestSolution, let state = latestState,
+              !solution.plan.legs.isEmpty else { return nil }
+        var points = [PlanProfile.Point(id: 0, mile: 0, soc: state.socPercent.value)]
+        var stops: [PlanProfile.Stop] = []
+        var x = 0.0, idx = 1
+        for (leg, stop) in zip(solution.plan.legs, solution.plan.stops) {
+            x += leg.distanceMi
+            points.append(.init(id: idx, mile: x, soc: stop.arrivalSOC)); idx += 1
+            points.append(.init(id: idx, mile: x, soc: stop.departureSOC)); idx += 1
+            let fullName = sites.first { $0.id == stop.siteID }?.name ?? stop.siteID
+            stops.append(.init(id: stop.siteID, mile: x, soc: stop.arrivalSOC,
+                               name: fullName.components(separatedBy: ",").first ?? fullName))
+        }
+        if solution.plan.legs.count > solution.plan.stops.count,
+           let lastLeg = solution.plan.legs.last {
+            let kWh = learner.model.predict(leg: lastLeg).kWh
+            x += lastLeg.distanceMi
+            points.append(.init(id: idx, mile: x,
+                                soc: max(0, (points.last?.soc ?? 50) - kWh / pack.usableKWh * 100)))
+        }
+        return PlanProfile(points: points, stops: stops)
+    }
+
     // MARK: road trips — any origin, any destination
 
     public private(set) var activeTrip: RouteCorridor?
