@@ -336,16 +336,19 @@ public final class AppModel {
               let leg = solution.plan.legs.first else { return }
         let siteName = sites.first { $0.id == stop.siteID }?.name ?? "the next stop"
 
-        // Pace: compare trending arrival SOC against the plan's target.
+        // Pace. Arriving BELOW the planned SOC is a feature, not a problem —
+        // lower arrival lands deeper in the peak-power zone. Slow down only
+        // when trending under the buffer floor; speed up when there's real
+        // margin above the plan.
         let legKWh = learner.model.predict(leg: leg).kWh
         let predicted = state.socPercent.value - legKWh / pack.usableKWh * 100
-        let delta = predicted - stop.arrivalSOC
-        if delta > 4 {
-            await engine.submit(kind: .paceUp, message:
-                "You have \(Int(delta))% of margin this leg — add ~5 mph and you'll still reach \(siteName) at \(Int(stop.arrivalSOC))% for peak charging.")
-        } else if delta < -3, predicted > pack.bufferFloorSOC {
+        let floor = pack.bufferFloorSOC
+        if predicted < floor + 1.5 {
             await engine.submit(kind: .paceDown, message:
-                "Slow down ~5 mph — trending to \(Int(predicted))% at \(siteName); the plan wants \(Int(stop.arrivalSOC))% on arrival.")
+                "Slow down ~5 mph — trending to \(Int(predicted))% at \(siteName), against a \(Int(floor))% buffer floor.")
+        } else if predicted - stop.arrivalSOC > 4 {
+            await engine.submit(kind: .paceUp, message:
+                "You have \(Int(predicted - stop.arrivalSOC))% of margin this leg — add ~5 mph. Arriving lower at \(siteName) also puts you deeper in the fast part of the curve.")
         }
 
         // Preconditioning: timed against arrival cell temperature. Only with
