@@ -15,6 +15,7 @@ public struct Recommendation: Sendable, Identifiable, Equatable {
         case paceDown          // arrive lower for peak-power charging
         case paceUp            // energy to burn — speed is free
         case chargeLimit       // car's limit will stop the session early
+        case planB             // passing the last fallback charger on a risky leg
         case info
 
         public static func < (l: Kind, r: Kind) -> Bool { l.rawValue < r.rawValue }
@@ -45,7 +46,7 @@ public actor RecommendationEngine {
         .severeWatchdog: 120, .bufferErosion: 300, .siteSwitch: 600,
         .stallSwitch: 180, .chargeLonger: 300, .departNow: 120, .departSoon: 240,
         .preconditionNow: 600, .paceDown: 300, .paceUp: 420, .chargeLimit: 600,
-        .info: 900,
+        .planB: 300, .info: 900,
     ]
 
     private var continuation: AsyncStream<Recommendation>.Continuation?
@@ -117,7 +118,7 @@ public actor RecommendationEngine {
             let soc = vehicle.socPercent.value
             if soc >= target {
                 emit(kind: .departNow,
-                     message: "Target \(Int(target))% reached — unplug and go.",
+                     message: "Target \(Int(target))% reached. Unplug and go.",
                      critical: false)
             } else if target - soc <= 4 {
                 // Countdown so unplugging is instant, not a scramble.
@@ -125,7 +126,7 @@ public actor RecommendationEngine {
                 let minutes = kWhToGo / max(20, vehicle.chargePowerKW.value) * 60
                 if minutes <= 3 {
                     emit(kind: .departSoon,
-                         message: "About \(max(1, Int(minutes.rounded()))) min to \(Int(target))% — wrap up and be ready to unplug.",
+                         message: "About \(max(1, Int(minutes.rounded()))) min to \(Int(target))%. Wrap up and be ready to unplug.",
                          critical: false)
                 }
             }

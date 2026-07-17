@@ -8,26 +8,53 @@ struct DriveScreen: View {
     let model: AppModel
     let dashboard: DashboardViewModel
     @State private var showTripSheet = false
+    @State private var showFullMap = false
+    @State private var showRunLog = false
+    @State private var navShareState: NavShareState = .idle
+
+    enum NavShareState: Equatable { case idle, sending, sent, failed(String) }
 
     var body: some View {
         VStack(spacing: 0) {
             DashboardView(model: dashboard)
             tripBar
         }
-        .sheet(isPresented: $showTripSheet) {
-            TripSearchSheet(model: model)
-        }
+        .sheet(isPresented: $showTripSheet) { TripSearchSheet(model: model) }
+        .sheet(isPresented: $showRunLog) { RunLogSheet(model: model) }
+        #if os(iOS)
+        .fullScreenCover(isPresented: $showFullMap) { FullTripMapView(model: model) }
+        #else
+        .sheet(isPresented: $showFullMap) { FullTripMapView(model: model) }
+        #endif
     }
 
     @ViewBuilder private var tripBar: some View {
         if let name = dashboard.tripDestinationName {
-            HStack {
-                Label(name, systemImage: "flag.checkered")
-                    .font(.callout.weight(.semibold))
-                    .lineLimit(1)
-                Spacer()
-                Button("End Trip", role: .destructive) { model.endTrip() }
+            VStack(spacing: 10) {
+                if let data = model.tripMapData() {
+                    TripMapView(data: data, compact: true)
+                        .frame(height: 165)
+                        .clipShape(RoundedRectangle(cornerRadius: 14))
+                        .onTapGesture { showFullMap = true }
+                }
+                if case .failed(let reason) = navShareState {
+                    Text(reason).font(.caption).foregroundStyle(.red)
+                }
+                HStack(spacing: 10) {
+                    Label(name, systemImage: "flag.checkered")
+                        .font(.callout.weight(.semibold))
+                        .lineLimit(1)
+                    Spacer()
+                    Button { sendToCarNav() } label: { navButtonLabel }
+                        .buttonStyle(.bordered)
+                        .disabled(navShareState == .sending)
+                    Button { showRunLog = true } label: {
+                        Image(systemName: "list.bullet.clipboard")
+                    }
                     .buttonStyle(.bordered)
+                    Button("End", role: .destructive) { model.endTrip() }
+                        .buttonStyle(.bordered)
+                }
             }
             .padding(.horizontal, 24).padding(.bottom, 12)
         } else {
@@ -40,6 +67,29 @@ struct DriveScreen: View {
             }
             .buttonStyle(.borderedProminent)
             .padding(.horizontal, 24).padding(.bottom, 12)
+        }
+    }
+
+    @ViewBuilder private var navButtonLabel: some View {
+        switch navShareState {
+        case .idle, .failed: Image(systemName: "paperplane.fill")
+        case .sending: ProgressView().controlSize(.small)
+        case .sent: Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+        }
+    }
+
+    /// Share the next planned stop into the car's nav — also the reliable
+    /// trigger for on-route preconditioning.
+    private func sendToCarNav() {
+        navShareState = .sending
+        Task {
+            if let error = await model.sendNextStopToCarNav() {
+                navShareState = .failed(error)
+            } else {
+                navShareState = .sent
+                try? await Task.sleep(for: .seconds(4))
+                if navShareState == .sent { navShareState = .idle }
+            }
         }
     }
 }

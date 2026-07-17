@@ -157,7 +157,7 @@ struct ChargeInsightsView: View {
             .chartXAxisLabel("Miles from here")
             .frame(height: 190)
             caption(plan.stops.isEmpty
-                ? "Direct to destination — no stops needed."
+                ? "Direct to destination, no stops needed."
                 : "Stops: " + plan.stops.map(\.name).joined(separator: " → ")
                     + ". Dots are arrival SOCs; the dashed line is the \(Int(pack.bufferFloorSOC))% buffer floor.")
         }

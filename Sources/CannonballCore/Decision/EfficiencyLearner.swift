@@ -12,6 +12,15 @@ public struct EfficiencyLearner: Sendable {
         public var fsdActive: Bool
         public var actualKWh: Double
         public var startedAt: Date
+
+        public init(distanceMi: Double, meanSpeedMps: Double, meanGradePercent: Double,
+                    headwindMps: Double, ambientC: Double, fsdActive: Bool,
+                    actualKWh: Double, startedAt: Date) {
+            self.distanceMi = distanceMi; self.meanSpeedMps = meanSpeedMps
+            self.meanGradePercent = meanGradePercent; self.headwindMps = headwindMps
+            self.ambientC = ambientC; self.fsdActive = fsdActive
+            self.actualKWh = actualKWh; self.startedAt = startedAt
+        }
     }
 
     public private(set) var model: EnergyModel

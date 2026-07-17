@@ -12,6 +12,8 @@ public actor SuperchargerDirectory {
         public var stallCount: Int
         public var powerKilowatt: Int
         public var elevationMeters: Double
+        public var facilityName: String?
+        public var facilityHours: String?
     }
 
     public static let shared = SuperchargerDirectory()
@@ -70,13 +72,17 @@ public actor SuperchargerDirectory {
         var stallCount: Int?
         var powerKilowatt: Int?
         var elevationMeters: Double?
+        var facilityName: String?
+        var facilityHours: String?
 
         var site: Site {
             Site(id: id, name: name,
                  latitude: gps.latitude, longitude: gps.longitude,
                  stallCount: stallCount ?? 8,
                  powerKilowatt: powerKilowatt ?? 150,
-                 elevationMeters: elevationMeters ?? 0)
+                 elevationMeters: elevationMeters ?? 0,
+                 facilityName: facilityName,
+                 facilityHours: facilityHours)
         }
     }
 }

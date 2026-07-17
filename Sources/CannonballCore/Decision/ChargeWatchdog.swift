@@ -104,11 +104,11 @@ public struct ChargeWatchdog: Sendable {
                                 site: Supercharger) -> String? {
         switch (state, reason) {
         case (.degraded, .thermalHot), (.severe, .thermalHot):
-            return "Pack thermally limited — stay plugged in; power recovers as SOC rises. ETA adjusted."
+            return "Pack thermally limited. Stay plugged in; power recovers as SOC rises. ETA adjusted."
         case (.degraded, .thermalCold), (.severe, .thermalCold):
-            return "Pack cold — power will ramp as it warms. Precondition timing missed; noted for next stop."
+            return "Pack cold. Power will ramp as it warms. Precondition timing missed; noted for next stop."
         case (.degraded, .sharedPower), (.severe, .sharedPower):
-            return "Sharing a V2 cabinet. Move to an unpaired stall — saves several minutes."
+            return "Sharing a V2 cabinet. Move to an unpaired stall to save several minutes."
         case (.degraded, .badStall):
             return "Stall underperforming. If it doesn't recover in 60 s, hop stalls (~90 s cost)."
         case (.severe, .badStall):

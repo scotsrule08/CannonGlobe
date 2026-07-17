@@ -144,7 +144,10 @@ public struct RouteCorridor: Sendable {
         }
 
         let sites = kept.map { c in
-            Supercharger(
+            var amenities: Set<String> = []
+            if let f = c.site.facilityName, !f.isEmpty { amenities.insert(f) }
+            if let h = c.site.facilityHours, !h.isEmpty { amenities.insert(h) }
+            return Supercharger(
                 id: "sc\(c.site.id)", name: c.site.name,
                 coordinate: CLLocationCoordinate2D(latitude: c.site.latitude,
                                                    longitude: c.site.longitude),
@@ -154,6 +157,7 @@ public struct RouteCorridor: Sendable {
                 detourSecondsEastbound: detourSeconds(offRouteMi: c.offRouteMi),
                 occupancy: .unknown,
                 healthScore: 1.0,
+                amenities: amenities,
                 routeMile: c.mile)
         }
 

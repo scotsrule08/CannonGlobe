@@ -25,6 +25,7 @@ public struct DashboardView: View {
                           tint: model.efficiencyOnPlan ? .green : .orange)
                 BigNumber(value: model.deltaVsTeslaText, label: "vs TESLA NAV", tint: .cyan)
             }
+            paceRow
             actionBanner
             Spacer(minLength: 0)
         }
@@ -41,6 +42,18 @@ public struct DashboardView: View {
             .padding(.horizontal, 8).padding(.vertical, 4)
             .background(model.sourceIsCAN ? .green.opacity(0.2) : .orange.opacity(0.25),
                         in: Capsule())
+    }
+
+    @ViewBuilder private var paceRow: some View {
+        if let pace = model.paceText, let eta = model.etaText {
+            HStack {
+                Label("\(pace) vs plan", systemImage: "gauge.with.needle")
+                    .foregroundStyle(model.paceIsAhead ? .green : .orange)
+                Spacer()
+                Label("ETA \(eta)", systemImage: "flag.checkered")
+            }
+            .font(.headline.monospacedDigit())
+        }
     }
 
     @ViewBuilder private var actionBanner: some View {
@@ -82,6 +95,9 @@ struct BigNumber: View {
     public var arrivalLabel = "ARRIVE SOC"
     public var minutesLabel = "MIN TO STOP"
     public var tripDestinationName: String?
+    public var paceText: String?
+    public var paceIsAhead = true
+    public var etaText: String?
     public var whPerMiText = "—"
     public var efficiencyOnPlan = true
     public var deltaVsTeslaText = "—"

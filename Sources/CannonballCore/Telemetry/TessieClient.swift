@@ -132,6 +132,43 @@ public actor TessieClient {
         }
     }
 
+    public struct DriveRecord: Sendable {
+        public var startedAt: Date
+        public var distanceMi: Double
+        public var energyKWh: Double
+        public var avgSpeedMph: Double
+        public var outsideTempC: Double
+        public var autopilotFraction: Double
+    }
+
+    /// Recent drive history — seeds the efficiency learner with this car's
+    /// real Wh/mi before the first live segment of a run.
+    public func driveHistory(limit: Int = 40) async throws -> [DriveRecord] {
+        struct DTO: Decodable {
+            struct Row: Decodable {
+                var startedAt: Double?
+                var odometerDistance: Double?
+                var energyUsed: Double?
+                var averageSpeed: Double?
+                var averageOutsideTemperature: Double?
+                var autopilotDistance: Double?
+            }
+            var results: [Row]
+        }
+        let url = base.appending(path: "\(vin)/drives")
+            .appending(queryItems: [.init(name: "limit", value: "\(limit)")])
+        return try await get(url, as: DTO.self).results.compactMap { row in
+            guard let miles = row.odometerDistance, miles > 1,
+                  let kWh = row.energyUsed, kWh > 0 else { return nil }
+            return DriveRecord(
+                startedAt: Date(timeIntervalSince1970: row.startedAt ?? 0),
+                distanceMi: miles, energyKWh: kWh,
+                avgSpeedMph: row.averageSpeed ?? 0,
+                outsideTempC: row.averageOutsideTemperature ?? 20,
+                autopilotFraction: min(1, (row.autopilotDistance ?? 0) / miles))
+        }
+    }
+
     /// Live stall availability via Fleet `nearby_charging_sites` (mirrored).
     public func nearbyChargingSites() async throws -> [NearbyChargingSite] {
         try await get(base.appending(path: "\(vin)/nearby_charging_sites"),

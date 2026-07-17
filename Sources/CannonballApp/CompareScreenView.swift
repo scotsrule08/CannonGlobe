@@ -43,6 +43,11 @@ public struct CompareScreenView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(row.name).font(.subheadline.weight(.semibold))
                     Text(row.detail).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                    if let amenity = row.amenity {
+                        Label(amenity, systemImage: "fork.knife")
+                            .font(.caption2).foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                    }
                 }
                 .padding(8)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -61,6 +66,7 @@ public struct CompareScreenView: View {
         public var id: String
         public var name: String
         public var detail: String       // "arr 8% · chg 14 min → 54%"
+        public var amenity: String?     // "Dunkin' · 4:30am-10:00pm daily"
         public var totalText: String?
     }
 
@@ -68,6 +74,7 @@ public struct CompareScreenView: View {
     public var teslaRows: [StopRow] = []
     public var headlineDelta: String?
     public var siteNames: [String: String] = [:]
+    public var siteAmenities: [String: String] = [:]
 
     public init() {}
 
@@ -93,6 +100,7 @@ public struct CompareScreenView: View {
                 id: "\(stop.siteID)-\(i)",
                 name: siteNames[stop.siteID] ?? stop.siteID,
                 detail: "arr \(Int(stop.arrivalSOC))% · chg \(Int(stop.chargeSeconds / 60)) min → \(Int(stop.departureSOC))%",
+                amenity: siteAmenities[stop.siteID],
                 totalText: i == 0 ? total : nil)
         }
     }

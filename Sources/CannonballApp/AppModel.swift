@@ -8,7 +8,7 @@ public enum TripError: LocalizedError {
 
     public var errorDescription: String? {
         switch self {
-        case .noCarLocation: "No car location yet — check the Tessie connection in Settings."
+        case .noCarLocation: "No car location yet. Check the Tessie connection in Settings."
         case .noRoute: "Couldn't route to that destination."
         }
     }
@@ -147,8 +147,68 @@ public final class AppModel {
         UserDefaults.standard.set(destination.latitude, forKey: "trip.lat")
         UserDefaults.standard.set(destination.longitude, forKey: "trip.lon")
         lastPlanSOC = -100; lastPlanAt = .distantPast
+        runLog = RunLog(tripName: name, startedAt: .init(),
+                        startSOC: latestState?.socPercent.value ?? 0,
+                        startOdometerMi: latestState?.odometerMi.value)
+        saveRunLog()
         if let s = latestState { maybeReplan(s) }
         Task { [weak self] in await self?.enrichTripEnvironment() }
+    }
+
+    /// Share the next planned Supercharger to the car's own navigation —
+    /// the reliable trigger for on-route battery preconditioning.
+    public func sendNextStopToCarNav() async -> String? {
+        guard let stop = latestSolution?.plan.stops.first,
+              let site = sites.first(where: { $0.id == stop.siteID }) else {
+            return "No planned stop to send yet."
+        }
+        do {
+            try await tessie.shareDestination(
+                "\(site.coordinate.latitude),\(site.coordinate.longitude)")
+            return nil
+        } catch {
+            return (error as? LocalizedError)?.errorDescription ?? "Couldn't reach the car."
+        }
+    }
+
+    public var plannedNextStopName: String? {
+        latestSolution?.plan.stops.first.flatMap { stop in
+            sites.first { $0.id == stop.siteID }?.name
+        }
+    }
+
+    // MARK: map data
+
+    struct TripMapData {
+        struct StopPin: Identifiable {
+            var id: String
+            var name: String
+            var coordinate: CLLocationCoordinate2D
+            var arrivalSOC: Double?    // set = planned stop
+            var amenity: String?
+        }
+        var route: [CLLocationCoordinate2D]
+        var stops: [StopPin]
+        var car: CLLocationCoordinate2D?
+        var destinationName: String
+    }
+
+    func tripMapData() -> TripMapData? {
+        guard let trip = activeTrip else { return nil }
+        let route = stride(from: 0, to: trip.points.count, by: 4).map {
+            CLLocationCoordinate2D(latitude: trip.points[$0].latitude,
+                                   longitude: trip.points[$0].longitude)
+        }
+        let plannedByID = Dictionary(uniqueKeysWithValues:
+            (latestSolution?.plan.stops ?? []).map { ($0.siteID, $0.arrivalSOC) })
+        let pins = sites.map { s in
+            TripMapData.StopPin(id: s.id, name: s.name, coordinate: s.coordinate,
+                                arrivalSOC: plannedByID[s.id],
+                                amenity: s.amenities.sorted().first)
+        }
+        return TripMapData(route: route, stops: pins,
+                           car: latestState?.coordinate.value,
+                           destinationName: trip.destinationName)
     }
 
     /// Background enrichment after a trip starts: dense terrain profile
@@ -192,6 +252,17 @@ public final class AppModel {
     }
 
     public func endTrip() {
+        if var log = runLog {
+            log.endedAt = .init()
+            let ts = Int(log.startedAt.timeIntervalSince1970)
+            try? JSONEncoder().encode(log).write(to:
+                FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                    .appendingPathComponent("runlog-\(ts).json"))
+            lastCompletedLog = log
+        }
+        runLog = nil
+        try? FileManager.default.removeItem(at: runLogURL)
+        dashboard.paceText = nil; dashboard.etaText = nil
         activeTrip = nil
         sites = CorridorSeed.superchargers()
         dashboard.tripDestinationName = nil
@@ -263,11 +334,103 @@ public final class AppModel {
                 self.latestState = state
                 self.maybeReplan(state)
                 self.maybeCoach(state)
+                self.recordRunLog(state)
             }
         }
         // Hourly weather refresh; occupancy refresh at 90 s (docs §4.3/§4.5).
         Task { await refreshLoop() }
         Task { await restoreSavedTrip() }
+        Task { await seedEfficiencyFromHistory() }
+        loadRunLog()
+    }
+
+    // MARK: efficiency seeding from cloud drive history
+
+    private var didSeedEfficiency = false
+
+    /// Calibrate the energy model from this car's real recent highway drives
+    /// (Tessie /drives) so leg predictions are personal from mile zero.
+    private func seedEfficiencyFromHistory() async {
+        for _ in 0..<24 {
+            if await tessie.hasCredentials { break }
+            try? await Task.sleep(for: .seconds(5))
+        }
+        guard !didSeedEfficiency, await tessie.hasCredentials,
+              let drives = try? await tessie.driveHistory(limit: 40) else { return }
+        didSeedEfficiency = true
+        let highway = drives
+            .filter { $0.avgSpeedMph > 45 && $0.distanceMi > 10 }
+            .sorted { $0.startedAt < $1.startedAt }
+        for d in highway {
+            learner.ingest(EfficiencyLearner.Segment(
+                distanceMi: d.distanceMi, meanSpeedMps: d.avgSpeedMph * 0.44704,
+                meanGradePercent: 0, headwindMps: 0, ambientC: d.outsideTempC,
+                fsdActive: d.autopilotFraction > 0.5,
+                actualKWh: d.energyKWh, startedAt: d.startedAt))
+        }
+    }
+
+    // MARK: run log — automatic stop records + pace baseline
+
+    private var runLog: RunLog?
+    private(set) var lastCompletedLog: RunLog?
+    private var wasDCCharging = false
+
+    func currentRunLog() -> RunLog? { runLog ?? lastCompletedLog }
+
+    private var runLogURL: URL {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("runlog-current.json")
+    }
+
+    private func saveRunLog() {
+        if let runLog { try? JSONEncoder().encode(runLog).write(to: runLogURL) }
+    }
+
+    private func loadRunLog() {
+        runLog = (try? Data(contentsOf: runLogURL))
+            .flatMap { try? JSONDecoder().decode(RunLog.self, from: $0) }
+    }
+
+    private func recordRunLog(_ state: VehicleState) {
+        let charging = state.isDCFastCharging.value
+        defer { wasDCCharging = charging }
+        guard runLog != nil else { return }
+        if charging && !wasDCCharging {
+            openStopRecord(state)
+        } else if !charging && wasDCCharging {
+            closeStopRecord(state)
+        }
+    }
+
+    private func openStopRecord(_ state: VehicleState) {
+        let coord = state.coordinate.value
+        let here = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
+        let site = sites.min {
+            here.distance(from: CLLocation(latitude: $0.coordinate.latitude, longitude: $0.coordinate.longitude)) <
+            here.distance(from: CLLocation(latitude: $1.coordinate.latitude, longitude: $1.coordinate.longitude))
+        }
+        let planned = latestSolution?.plan.stops.first { $0.siteID == site?.id }
+        runLog?.stops.append(ChargeStopRecord(
+            id: "\(site?.id ?? "site")-\(Int(Date().timeIntervalSince1970))",
+            siteID: site?.id ?? "unknown",
+            siteName: site?.name ?? "Supercharger",
+            startedAt: .init(),
+            arrivalSOC: state.socPercent.value,
+            plannedArrivalSOC: planned?.arrivalSOC,
+            plannedDepartureSOC: planned?.departureSOC,
+            plannedChargeSeconds: planned?.chargeSeconds))
+        saveRunLog()
+    }
+
+    private func closeStopRecord(_ state: VehicleState) {
+        guard var log = runLog, var last = log.stops.last, last.endedAt == nil else { return }
+        last.endedAt = .init()
+        last.departureSOC = state.socPercent.value
+        last.energyAddedKWh = max(0, (state.socPercent.value - last.arrivalSOC) / 100 * pack.usableKWh)
+        log.stops[log.stops.count - 1] = last
+        runLog = log
+        saveRunLog()
     }
 
     // MARK: replanning
@@ -351,39 +514,102 @@ public final class AppModel {
         } else {
             pinned = nil
         }
+        if runLog != nil, runLog?.baselineTotalSeconds == nil {
+            runLog?.baselineTotalSeconds = solution.plan.totalRemainingSeconds
+            saveRunLog()
+        }
         await MainActor.run {
             self.latestSolution = solution
+            self.compare.siteAmenities = Dictionary(uniqueKeysWithValues:
+                self.sites.map { ($0.id, $0.amenities.sorted().joined(separator: " · ")) })
+                .filter { !$0.value.isEmpty }
             self.compare.update(optimized: solution.plan, teslaNav: pinned?.plan,
                                 siteNames: Dictionary(uniqueKeysWithValues: self.sites.map { ($0.id, $0.name) }))
             self.dashboard.update(plan: solution.plan, siteNames: self.compare.siteNames)
+            // Pace vs the first plan of the run.
+            if let log = self.runLog, let baseline = log.baselineTotalSeconds {
+                let projected = Date().timeIntervalSince(log.startedAt)
+                    + solution.plan.totalRemainingSeconds
+                let delta = projected - baseline
+                self.dashboard.paceText = (delta >= 0 ? "+" : "-") + "\(abs(Int(delta / 60))) min"
+                self.dashboard.paceIsAhead = delta <= 60
+                self.dashboard.etaText = Date()
+                    .addingTimeInterval(solution.plan.totalRemainingSeconds)
+                    .formatted(date: .omitted, time: .shortened)
+            }
         }
         await engine.updatePlans(optimized: solution.plan, teslaNav: pinned?.plan)
         if !state.isDCFastCharging.value {
-            await adviseDriving(state: state, solution: solution)
+            await adviseDriving(state: state, solution: solution, currentMile: ctx.mile)
         }
     }
 
     // MARK: live advisors — the time-shaving nags
 
-    /// Pace, preconditioning, and charge-limit advice for the current leg.
-    private func adviseDriving(state: VehicleState, solution: TripPlanner.Solution) async {
+    /// Pace, plan-B, preconditioning, and charge-limit advice for the leg.
+    private func adviseDriving(state: VehicleState, solution: TripPlanner.Solution,
+                               currentMile: Double) async {
         guard let stop = solution.plan.stops.first,
               let leg = solution.plan.legs.first else { return }
-        let siteName = sites.first { $0.id == stop.siteID }?.name ?? "the next stop"
+        let stopSite = sites.first { $0.id == stop.siteID }
+        let siteName = stopSite?.name ?? "the next stop"
 
-        // Pace. Arriving BELOW the planned SOC is a feature, not a problem —
-        // lower arrival lands deeper in the peak-power zone. Slow down only
-        // when trending under the buffer floor; speed up when there's real
-        // margin above the plan.
         let legKWh = learner.model.predict(leg: leg).kWh
         let predicted = state.socPercent.value - legKWh / pack.usableKWh * 100
         let floor = pack.bufferFloorSOC
+
         if predicted < floor + 1.5 {
+            // Safety: trending under the buffer floor is the ONLY reason to
+            // slow for SOC — arriving below plan is otherwise a feature.
             await engine.submit(kind: .paceDown, message:
-                "Slow down ~5 mph — trending to \(Int(predicted))% at \(siteName), against a \(Int(floor))% buffer floor.")
-        } else if predicted - stop.arrivalSOC > 4 {
-            await engine.submit(kind: .paceUp, message:
-                "You have \(Int(predicted - stop.arrivalSOC))% of margin this leg — add ~5 mph. Arriving lower at \(siteName) also puts you deeper in the fast part of the curve.")
+                "Slow down ~5 mph: trending to \(Int(predicted))% at \(siteName), against a \(Int(floor))% buffer floor.")
+        } else {
+            // Optimal cruise speed: sweep ±10 mph and price the extra Wh/mi
+            // against minutes at the next plug. Faster driving that charges
+            // back cheap (peak-zone arrival) often wins outright.
+            let v0 = leg.avgSpeedMps
+            var currentTotal = Double.infinity
+            var best = (v: v0, total: Double.infinity)
+            for step in -4...4 {
+                let v = v0 + Double(step) * 1.118   // 2.5 mph increments
+                guard v > 22 else { continue }
+                var candidate = leg
+                candidate.avgSpeedMps = v
+                candidate.trafficDriveSeconds = leg.distanceMi * 1609.34 / v
+                let kWh = learner.model.predict(leg: candidate).kWh
+                let arrival = state.socPercent.value - kWh / pack.usableKWh * 100
+                guard arrival >= floor else { continue }
+                let chargeBack = curve.secondsToCharge(
+                    from: arrival, to: stop.departureSOC,
+                    cellTempStartC: (min: 35, max: 40),
+                    siteVersion: stopSite?.version ?? .v3)
+                let total = candidate.trafficDriveSeconds + chargeBack
+                if step == 0 { currentTotal = total }
+                if total < best.total { best = (v, total) }
+            }
+            if currentTotal.isFinite, best.total + 60 < currentTotal,
+               abs(best.v - v0) >= 1.1 {
+                let mph = Int((best.v * 2.23694).rounded())
+                let saves = max(1, Int(((currentTotal - best.total) / 60).rounded()))
+                let kind: Recommendation.Kind = best.v > v0 ? .paceUp : .paceDown
+                let lead = best.v > v0 ? "Faster is free here" : "Backing off wins here"
+                await engine.submit(kind: kind, message:
+                    "\(lead): ~\(mph) mph is time-optimal this leg, saving about \(saves) min net of charging at \(siteName).")
+            }
+        }
+
+        // Plan B: alert while passing the last fallback charger on a risky leg.
+        if predicted < floor + 4, let stopSite {
+            let fallbacks = sites.filter { site in
+                site.routeMile > currentMile && site.routeMile < stopSite.routeMile - 1
+                    && !solution.plan.stops.contains { $0.siteID == site.id }
+            }
+            if let last = fallbacks.max(by: { $0.routeMile < $1.routeMile }),
+               last.routeMile - currentMile < 3 {
+                await engine.submit(kind: .planB, message:
+                    "Passing \(last.name): last charger before \(siteName) (\(Int(stopSite.routeMile - last.routeMile)) mi to go). Trending \(Int(predicted))% on arrival.",
+                    critical: true)
+            }
         }
 
         // Preconditioning: timed against arrival cell temperature. Only with
@@ -396,9 +622,9 @@ public final class AppModel {
             if case .startNow = advice.action {
                 let message = switch advice.mode {
                 case .heat:
-                    "Start preconditioning now — arrive at \(siteName) with cells at \(Int(advice.predictedArrivalTempWithPrecondition)) °C instead of \(Int(advice.predictedArrivalTempNoPrecondition)) °C."
+                    "Start preconditioning now to arrive at \(siteName) with cells at \(Int(advice.predictedArrivalTempWithPrecondition)) °C instead of \(Int(advice.predictedArrivalTempNoPrecondition)) °C."
                 case .cool:
-                    "Start precooling now — pack is trending to \(Int(advice.predictedArrivalTempNoPrecondition)) °C at \(siteName); cooling toward \(Int(advice.predictedArrivalTempWithPrecondition)) °C avoids the hot-side taper."
+                    "Start precooling now: pack is trending to \(Int(advice.predictedArrivalTempNoPrecondition)) °C at \(siteName); cooling toward \(Int(advice.predictedArrivalTempWithPrecondition)) °C avoids the hot-side taper."
                 }
                 await engine.submit(kind: .preconditionNow, message: message)
             }
@@ -408,7 +634,7 @@ public final class AppModel {
         if let cloud = await tessie.latestCloudState(), let limit = cloud.chargeLimitSOC,
            stop.departureSOC > limit + 1 {
             await engine.submit(kind: .chargeLimit, message:
-                "Raise the car's charge limit — it's set to \(Int(limit))% but the plan departs \(siteName) at \(Int(stop.departureSOC))%.")
+                "Raise the car's charge limit: it's set to \(Int(limit))% but the plan departs \(siteName) at \(Int(stop.departureSOC))%.")
         }
     }
 
@@ -453,15 +679,15 @@ public final class AppModel {
         switch advice.call {
         case .leaveNow(let taper, let kW):
             let message = taper
-                ? "Leave now — the curve has tapered to \(Int(kW)) kW. It's faster to run deeper into the pack and charge low again later."
-                : "Leave now — more charge here costs more time than it saves."
+                ? "Leave now: the curve has tapered to \(Int(kW)) kW. It's faster to run deeper into the pack and charge low again later."
+                : "Leave now: more charge here costs more time than it saves."
             await engine.submit(kind: .departNow, message: message)
         case .chargeLonger(let extra, let saves, let skipsID):
             let message: String
             if let skipsID, let name = sites.first(where: { $0.id == skipsID })?.name {
-                message = "Charge \(extra) more min and you can stretch past \(name) — saves about \(saves) min overall."
+                message = "Charge \(extra) more min and you can stretch past \(name), saving about \(saves) min overall."
             } else {
-                message = "Stay \(extra) more min — saves about \(saves) min overall."
+                message = "Stay \(extra) more min to save about \(saves) min overall."
             }
             await engine.submit(kind: .chargeLonger, message: message,
                                 deltaSeconds: Double(saves * 60))

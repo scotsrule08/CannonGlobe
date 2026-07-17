@@ -51,7 +51,7 @@ public struct SOCTargetCalculator: Sendable {
         let floorWithSigma = pack.bufferFloorSOC + bufferZ * (sigma / pack.usableKWh * 100)
         guard arrival < floorWithSigma else { return nil }
         if arrival < pack.bufferFloorSOC {
-            return "Arrival \(arrival.rounded(toPlaces: 1))% is below floor — reduce set speed 5 mph or divert to nearer site now."
+            return "Arrival \(arrival.rounded(toPlaces: 1))% is below floor. Reduce set speed 5 mph or divert to nearer site now."
         }
         return "Buffer eroding: forecast arrival \(arrival.rounded(toPlaces: 1))% vs \(floorWithSigma.rounded(toPlaces: 1))% comfort line. Watching."
     }
