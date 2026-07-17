@@ -47,7 +47,7 @@ public struct ChargeScreenView: View {
                 Text(model.actualKWText)
                     .font(.system(size: 64, weight: .black, design: .rounded))
                     .monospacedDigit()
-                    .foregroundStyle(model.ratioIsHealthy ? .primary : .orange)
+                    .foregroundStyle(model.ratioIsHealthy ? AnyShapeStyle(.primary) : AnyShapeStyle(.orange))
                 Text("/ \(model.expectedKWText) kW expected")
                     .font(.title3).foregroundStyle(.secondary)
             }

@@ -65,7 +65,9 @@ public struct TripPlanner: Sendable {
     public func solve(_ p: Problem) -> Solution? {
         let ahead = p.sites.filter { $0.routeMile > p.currentMile && $0.routeMile < p.destinationMile }
         let buckets = Int(100 / bucketPct) + 1
-        let floorBucket = bucket(pack.bufferFloorSOC)
+        // Ceil, not truncate: bucket(5.0) would be the 4% bucket, letting the
+        // DP plan arrivals below the buffer floor.
+        let floorBucket = Int((pack.bufferFloorSOC / bucketPct).rounded(.up))
 
         // Per-site precomputation: leg energy/time to the next few sites and to
         // the destination, and the cumulative charge-time table at this site.
@@ -119,8 +121,11 @@ public struct TripPlanner: Sendable {
                     // Option B: hop to a later site.
                     for (j, leg, kWh) in c.next {
                         let arrivalSOC = socOut - kWh / pack.usableKWh * 100
-                        let ab = bucket(arrivalSOC)
-                        guard ab >= floorBucket, value[j][ab] < inf else { continue }
+                        // Feasibility on the continuous SOC; nearest bucket for
+                        // the value lookup (truncating leaks up to 2% per hop).
+                        guard arrivalSOC >= pack.bufferFloorSOC else { continue }
+                        let ab = max(floorBucket, nearestBucket(arrivalSOC))
+                        guard value[j][ab] < inf else { continue }
                         let cost = (t > b ? overhead + chargeSec : 0)
                             + leg.trafficDriveSeconds + value[j][ab]
                         if cost < best { best = cost; bestChoice = (t, j) }
@@ -140,8 +145,9 @@ public struct TripPlanner: Sendable {
             let leg = p.legBuilder(p.currentMile, c.site.routeMile)
             let kWh = energy.predict(leg: leg).kWh
             let arrivalSOC = p.currentSOC - kWh / pack.usableKWh * 100
-            let ab = bucket(arrivalSOC)
-            guard ab >= floorBucket, value[i][ab] < inf else { continue }
+            guard arrivalSOC >= pack.bufferFloorSOC else { continue }
+            let ab = max(floorBucket, nearestBucket(arrivalSOC))
+            guard value[i][ab] < inf else { continue }
             let cost = leg.trafficDriveSeconds + value[i][ab]
             if cost < entryBest { entryBest = cost; entry = (i, ab) }
         }
@@ -150,7 +156,7 @@ public struct TripPlanner: Sendable {
         let directKWh = energy.predict(leg: directLeg).kWh
         if p.entryRestrictedTo == nil,
            p.currentSOC - directKWh / pack.usableKWh * 100 >= pack.bufferFloorSOC,
-           directLeg.trafficDriveSeconds < entryBest {
+           directLeg.trafficDriveSeconds <= entryBest {
             let plan = TripPlan(generatedAt: .init(), legs: [directLeg], stops: [],
                                 totalRemainingSeconds: directLeg.trafficDriveSeconds)
             return Solution(plan: plan, downstreamSeconds: [:], valueTable: [:])
@@ -165,12 +171,16 @@ public struct TripPlanner: Sendable {
             let (t, nextIndex) = choice[i][b]
             guard t >= 0 else { break }
             let c = calcs[i]
-            stops.append(PlannedStop(
-                siteID: c.site.id,
-                arrivalSOC: soc(b), departureSOC: soc(t),
-                chargeSeconds: c.chargeCum[t] - c.chargeCum[b],
-                detourSeconds: stopDetourSeconds(c.site, westbound: p.westbound),
-                expectedQueueSeconds: queueSeconds(c.site)))
+            // t == b is a pass-through (drive by, charge nothing) — the DP
+            // charged it no overhead, so it is not a stop.
+            if t > b {
+                stops.append(PlannedStop(
+                    siteID: c.site.id,
+                    arrivalSOC: soc(b), departureSOC: soc(t),
+                    chargeSeconds: c.chargeCum[t] - c.chargeCum[b],
+                    detourSeconds: stopDetourSeconds(c.site, westbound: p.westbound),
+                    expectedQueueSeconds: queueSeconds(c.site)))
+            }
             if nextIndex == -1 {
                 legs.append(p.legBuilder(c.site.routeMile, p.destinationMile))
                 break
@@ -178,7 +188,7 @@ public struct TripPlanner: Sendable {
             let (j, leg, kWh) = c.next.first { $0.index == nextIndex }!
             legs.append(leg)
             let arrivalSOC = soc(t) - kWh / pack.usableKWh * 100
-            (i, b) = (j, bucket(arrivalSOC))
+            (i, b) = (j, max(floorBucket, nearestBucket(arrivalSOC)))
         }
 
         var downstream: [String: Double] = [:]
@@ -210,6 +220,9 @@ public struct TripPlanner: Sendable {
     // MARK: helpers
 
     func bucket(_ soc: Double) -> Int { max(0, min(Int(100 / bucketPct), Int(soc / bucketPct))) }
+    func nearestBucket(_ soc: Double) -> Int {
+        max(0, min(Int(100 / bucketPct), Int((soc / bucketPct).rounded())))
+    }
     func soc(_ bucket: Int) -> Double { Double(bucket) * bucketPct }
 
     func stopDetourSeconds(_ s: Supercharger, westbound: Bool) -> Double {

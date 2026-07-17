@@ -69,7 +69,9 @@ public struct ChargeCurveModel: Sendable {
         guard expected > 5 else { return }
         let i = max(0, min(9, Int(soc / 10)))
         let ratio = max(0.5, min(1.5, actual / expected))
-        residuals[i] += residualAlpha * (ratio * residuals[i] - residuals[i])
+        // EWMA toward the observed ratio: repeated identical observations
+        // converge to the ratio instead of compounding without bound.
+        residuals[i] += residualAlpha * (ratio - residuals[i])
     }
 
     // MARK: - Piecewise-linear interpolation over sorted (x, y) anchors.
