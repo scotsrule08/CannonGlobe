@@ -10,10 +10,21 @@ struct SettingsView: View {
     @State private var savedAt: Date?
     @State private var status = TessieClient.ConnectionStatus()
     @State private var resetDone = false
+    @AppStorage("raceModeEnabled") private var raceMode = true
 
     var body: some View {
         NavigationStack {
             Form {
+                Section {
+                    Toggle(isOn: $raceMode) {
+                        Label("Race mode", systemImage: raceMode ? "flag.checkered" : "moon.zzz")
+                    }
+                    .onChange(of: raceMode) { _, on in model.setRaceMode(on) }
+                } footer: {
+                    Text(raceMode
+                        ? "The copilot is live: coaching notifications for charging, pace, preconditioning, and fallbacks."
+                        : "Quiet mode: no coaching notifications. Planning, maps, charts, the Car tab, and the logbook keep working.")
+                }
                 Section("Connection") {
                     HStack(spacing: 10) {
                         Circle().fill(statusColor).frame(width: 10, height: 10)

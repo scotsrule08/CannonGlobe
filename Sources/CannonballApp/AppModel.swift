@@ -97,6 +97,18 @@ public final class AppModel {
         await tessie.currentStatus()
     }
 
+    // MARK: race mode — off = observe quietly, never coach
+
+    var raceModeEnabled: Bool {
+        UserDefaults.standard.object(forKey: "raceModeEnabled") as? Bool ?? true
+    }
+
+    public func setRaceMode(_ on: Bool) {
+        UserDefaults.standard.set(on, forKey: "raceModeEnabled")
+        Task { await engine.setEnabled(on) }
+        if !on { dashboard.activeRecommendation = nil }
+    }
+
     public struct CarSnapshot: Sendable {
         public var cloud: CloudVehicleState?
         public var pack: PackProfile
@@ -358,6 +370,7 @@ public final class AppModel {
         Task { await refreshLoop() }
         Task { await restoreSavedTrip() }
         Task { await seedEfficiencyFromHistory() }
+        Task { await engine.setEnabled(raceModeEnabled) }
         loadRunLog()
     }
 
@@ -556,7 +569,7 @@ public final class AppModel {
             }
         }
         await engine.updatePlans(optimized: solution.plan, teslaNav: pinned?.plan)
-        if !state.isDCFastCharging.value {
+        if raceModeEnabled, !state.isDCFastCharging.value {
             await adviseDriving(state: state, solution: solution, currentMile: ctx.mile)
         }
     }
@@ -658,7 +671,8 @@ public final class AppModel {
     private var lastCoachAt = Date.distantPast
 
     private func maybeCoach(_ state: VehicleState) {
-        guard state.isDCFastCharging.value,
+        guard raceModeEnabled,
+              state.isDCFastCharging.value,
               Date().timeIntervalSince(lastCoachAt) > 60 else { return }
         lastCoachAt = .init()
         Task { [weak self] in await self?.runChargeCoach(state) }

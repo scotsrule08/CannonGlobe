@@ -49,6 +49,10 @@ public actor RecommendationEngine {
         .planB: 300, .info: 900,
     ]
 
+    /// Master switch — off means daily driving: observe, never coach.
+    private var enabled = true
+    public func setEnabled(_ on: Bool) { enabled = on }
+
     private var continuation: AsyncStream<Recommendation>.Continuation?
     public private(set) var recommendations: AsyncStream<Recommendation>!
 
@@ -189,6 +193,7 @@ public actor RecommendationEngine {
 
     private func emit(kind: Recommendation.Kind, message: String,
                       critical: Bool, deltaSeconds: Double? = nil) {
+        guard enabled else { return }
         let now = Date()
         if let last = lastRecommendation[kind],
            now.timeIntervalSince(last) < (cooldowns[kind] ?? 300) { return }
