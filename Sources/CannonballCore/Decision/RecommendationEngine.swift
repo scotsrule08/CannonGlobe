@@ -8,8 +8,13 @@ public struct Recommendation: Sendable, Identifiable, Equatable {
         case bufferErosion
         case siteSwitch
         case stallSwitch
+        case chargeLonger      // stay N min → skip a stop / net time win
+        case departNow         // leave the plug — taper economics
+        case departSoon        // target SOC imminent, wrap up
         case preconditionNow
-        case departNow
+        case paceDown          // arrive lower for peak-power charging
+        case paceUp            // energy to burn — speed is free
+        case chargeLimit       // car's limit will stop the session early
         case info
 
         public static func < (l: Kind, r: Kind) -> Bool { l.rawValue < r.rawValue }
@@ -38,7 +43,9 @@ public actor RecommendationEngine {
     /// Per-kind cooldowns so the cabin isn't a nag machine at 3 a.m. in Kansas.
     private let cooldowns: [Recommendation.Kind: TimeInterval] = [
         .severeWatchdog: 120, .bufferErosion: 300, .siteSwitch: 600,
-        .stallSwitch: 180, .preconditionNow: 600, .departNow: 60, .info: 900,
+        .stallSwitch: 180, .chargeLonger: 300, .departNow: 120, .departSoon: 240,
+        .preconditionNow: 600, .paceDown: 300, .paceUp: 420, .chargeLimit: 600,
+        .info: 900,
     ]
 
     private var continuation: AsyncStream<Recommendation>.Continuation?
@@ -106,10 +113,22 @@ public actor RecommendationEngine {
         }
 
         // Depart-now: the single biggest recurring win — recomputed live.
-        if let target = activeTargetSOC(), vehicle.socPercent.value >= target {
-            emit(kind: .departNow,
-                 message: "Target \(Int(target))% reached — unplug and go.",
-                 critical: false)
+        if let target = activeTargetSOC() {
+            let soc = vehicle.socPercent.value
+            if soc >= target {
+                emit(kind: .departNow,
+                     message: "Target \(Int(target))% reached — unplug and go.",
+                     critical: false)
+            } else if target - soc <= 4 {
+                // Countdown so unplugging is instant, not a scramble.
+                let kWhToGo = (target - soc) / 100 * curve.profile.usableKWh
+                let minutes = kWhToGo / max(20, vehicle.chargePowerKW.value) * 60
+                if minutes <= 3 {
+                    emit(kind: .departSoon,
+                         message: "About \(max(1, Int(minutes.rounded()))) min to \(Int(target))% — wrap up and be ready to unplug.",
+                         critical: false)
+                }
+            }
         }
     }
 
@@ -149,6 +168,13 @@ public actor RecommendationEngine {
     public func updatePlans(optimized: TripPlan, teslaNav: TripPlan?) {
         activePlan = optimized
         teslaNavPlan = teslaNav
+    }
+
+    /// Entry point for advisors computed outside the engine (charge coach,
+    /// pace advice, precondition timing) — same arbitration and cooldowns.
+    public func submit(kind: Recommendation.Kind, message: String,
+                       deltaSeconds: Double? = nil, critical: Bool = false) {
+        emit(kind: kind, message: message, critical: critical, deltaSeconds: deltaSeconds)
     }
 
     private func emit(kind: Recommendation.Kind, message: String,

@@ -182,6 +182,7 @@ public final class AppModel {
             for await state in await fusion.states {
                 self.latestState = state
                 self.maybeReplan(state)
+                self.maybeCoach(state)
             }
         }
         // Hourly weather refresh; occupancy refresh at 90 s (docs §4.3/§4.5).
@@ -220,41 +221,49 @@ public final class AppModel {
     /// A user trip has the actual polyline, so the deviation test is tight.
     private static let offRouteThresholdMi = 10.0
 
+    private struct PlanContext {
+        var destinationMile: Double
+        var mile: Double
+        var legBuilder: TripPlanner.LegBuilder
+    }
+
+    /// Shared by replan and the charge coach; nil means "off plan" and the
+    /// caller should fall back to plain car data.
+    private func planContext(for coord: CLLocationCoordinate2D,
+                             ambientC: Double) async -> PlanContext? {
+        if let trip = activeTrip {
+            guard trip.distanceToRouteMi(coord) <= Self.offRouteThresholdMi else { return nil }
+            return PlanContext(destinationMile: trip.destinationMile,
+                               mile: trip.mile(of: coord),
+                               legBuilder: trip.legBuilder(ambientTempC: ambientC))
+        }
+        guard nearestSiteDistanceMi(of: coord) <= Self.offCorridorThresholdMi else { return nil }
+        return PlanContext(destinationMile: CorridorSeed.destinationMile,
+                           mile: await routeMile(of: coord),
+                           legBuilder: await corridor.legBuilderSnapshot())
+    }
+
+    private func freshPlanner() -> TripPlanner {
+        var p = planner
+        p.curve = curve
+        p.energy = learner.model
+        p.maxFanOut = activeTrip != nil ? 14 : 8
+        return p
+    }
+
     private func replan(_ state: VehicleState) async {
         let coord = state.coordinate.value
-        let destinationMile: Double
-        let mile: Double
-        let legBuilder: TripPlanner.LegBuilder
-
-        if let trip = activeTrip {
-            guard trip.distanceToRouteMi(coord) <= Self.offRouteThresholdMi else {
-                let cloud = await tessie.latestCloudState()
-                await MainActor.run { self.dashboard.update(offCorridor: cloud) }
-                return
-            }
-            destinationMile = trip.destinationMile
-            mile = trip.mile(of: coord)
-            legBuilder = trip.legBuilder(ambientTempC: state.ambientTempC.value)
-        } else {
-            guard nearestSiteDistanceMi(of: coord) <= Self.offCorridorThresholdMi else {
-                let cloud = await tessie.latestCloudState()
-                await MainActor.run { self.dashboard.update(offCorridor: cloud) }
-                return
-            }
-            destinationMile = CorridorSeed.destinationMile
-            mile = await routeMile(of: coord)
-            legBuilder = await corridor.legBuilderSnapshot()
+        guard let ctx = await planContext(for: coord, ambientC: state.ambientTempC.value) else {
+            let cloud = await tessie.latestCloudState()
+            await MainActor.run { self.dashboard.update(offCorridor: cloud) }
+            return
         }
-
-        var freshPlanner = planner
-        freshPlanner.curve = curve
-        freshPlanner.energy = learner.model
-        freshPlanner.maxFanOut = activeTrip != nil ? 14 : 8
+        let freshPlanner = freshPlanner()
         let problem = TripPlanner.Problem(
-            sites: sites, destinationMile: destinationMile,
-            currentMile: mile, currentSOC: state.socPercent.value,
+            sites: sites, destinationMile: ctx.destinationMile,
+            currentMile: ctx.mile, currentSOC: state.socPercent.value,
             cellTempC: (state.cellTempMinC.value, state.cellTempMaxC.value),
-            legBuilder: legBuilder)
+            legBuilder: ctx.legBuilder)
         guard let solution = freshPlanner.solve(problem) else { return }
         let pinned: TripPlanner.Solution?
         if let navSite = await teslaNavSiteID(), navSite != solution.plan.stops.first?.siteID {
@@ -269,6 +278,105 @@ public final class AppModel {
             self.dashboard.update(plan: solution.plan, siteNames: self.compare.siteNames)
         }
         await engine.updatePlans(optimized: solution.plan, teslaNav: pinned?.plan)
+        if !state.isDCFastCharging.value {
+            await adviseDriving(state: state, solution: solution)
+        }
+    }
+
+    // MARK: live advisors — the time-shaving nags
+
+    /// Pace, preconditioning, and charge-limit advice for the current leg.
+    private func adviseDriving(state: VehicleState, solution: TripPlanner.Solution) async {
+        guard let stop = solution.plan.stops.first,
+              let leg = solution.plan.legs.first else { return }
+        let siteName = sites.first { $0.id == stop.siteID }?.name ?? "the next stop"
+
+        // Pace: compare trending arrival SOC against the plan's target.
+        let legKWh = learner.model.predict(leg: leg).kWh
+        let predicted = state.socPercent.value - legKWh / pack.usableKWh * 100
+        let delta = predicted - stop.arrivalSOC
+        if delta > 4 {
+            await engine.submit(kind: .paceUp, message:
+                "You have \(Int(delta))% of margin this leg — add ~5 mph and you'll still reach \(siteName) at \(Int(stop.arrivalSOC))% for peak charging.")
+        } else if delta < -3, predicted > pack.bufferFloorSOC {
+            await engine.submit(kind: .paceDown, message:
+                "Slow down ~5 mph — trending to \(Int(predicted))% at \(siteName); the plan wants \(Int(stop.arrivalSOC))% on arrival.")
+        }
+
+        // Preconditioning: timed against arrival cell temperature.
+        let minutesToStop = leg.trafficDriveSeconds / 60
+        if minutesToStop < 45 {
+            let advice = preconditioner.advise(cellTempMaxC: state.cellTempMaxC.value,
+                                               ambientC: state.ambientTempC.value,
+                                               minutesToArrival: minutesToStop)
+            if case .startNow = advice.action {
+                await engine.submit(kind: .preconditionNow, message:
+                    "Start preconditioning now — arrive at \(siteName) with cells at \(Int(advice.predictedArrivalTempWithPrecondition)) °C instead of \(Int(advice.predictedArrivalTempNoPrecondition)) °C.")
+            }
+        }
+
+        // Charge-limit guard: the car will stop the session under the plan.
+        if let cloud = await tessie.latestCloudState(), let limit = cloud.chargeLimitSOC,
+           stop.departureSOC > limit + 1 {
+            await engine.submit(kind: .chargeLimit, message:
+                "Raise the car's charge limit — it's set to \(Int(limit))% but the plan departs \(siteName) at \(Int(stop.departureSOC))%.")
+        }
+    }
+
+    private var lastCoachAt = Date.distantPast
+
+    private func maybeCoach(_ state: VehicleState) {
+        guard state.isDCFastCharging.value,
+              Date().timeIntervalSince(lastCoachAt) > 60 else { return }
+        lastCoachAt = .init()
+        Task { [weak self] in await self?.runChargeCoach(state) }
+    }
+
+    /// While plugged in: is the fastest move to leave, or to stretch?
+    private func runChargeCoach(_ state: VehicleState) async {
+        let coord = state.coordinate.value
+        guard let ctx = await planContext(for: coord, ambientC: state.ambientTempC.value)
+        else { return }
+        let here = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
+        func meters(_ s: Supercharger) -> Double {
+            here.distance(from: CLLocation(latitude: s.coordinate.latitude,
+                                           longitude: s.coordinate.longitude))
+        }
+        guard let site = sites.min(by: { meters($0) < meters($1) }),
+              meters(site) < 3200 else { return }   // must actually be at a site
+
+        let problem = TripPlanner.Problem(
+            sites: sites, destinationMile: ctx.destinationMile,
+            currentMile: site.routeMile + 0.1,      // departing this stop
+            currentSOC: state.socPercent.value,
+            cellTempC: (state.cellTempMinC.value, state.cellTempMaxC.value),
+            legBuilder: ctx.legBuilder)
+        let planner = freshPlanner()
+        let curveNow = curve
+        let temp = (min: state.cellTempMinC.value, max: state.cellTempMaxC.value)
+        let version = site.version
+        let advice = await Task.detached(priority: .utility) {
+            ChargeCoach.evaluate(planner: planner, problem: problem, curve: curveNow,
+                                 siteVersion: version, cellTemp: temp)
+        }.value
+        guard let advice else { return }
+
+        switch advice.call {
+        case .leaveNow(let taper, let kW):
+            let message = taper
+                ? "Leave now — the curve has tapered to \(Int(kW)) kW. It's faster to run deeper into the pack and charge low again later."
+                : "Leave now — more charge here costs more time than it saves."
+            await engine.submit(kind: .departNow, message: message)
+        case .chargeLonger(let extra, let saves, let skipsID):
+            let message: String
+            if let skipsID, let name = sites.first(where: { $0.id == skipsID })?.name {
+                message = "Charge \(extra) more min and you can stretch past \(name) — saves about \(saves) min overall."
+            } else {
+                message = "Stay \(extra) more min — saves about \(saves) min overall."
+            }
+            await engine.submit(kind: .chargeLonger, message: message,
+                                deltaSeconds: Double(saves * 60))
+        }
     }
 
     /// Candidates near the next planned stop for the scorer/nav-challenger.
