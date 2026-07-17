@@ -68,12 +68,29 @@ public final class AppModel {
     }
 
     /// Persist credentials from Settings and hand them to the live client.
+    /// A VIN change is a car swap: learned efficiency resets automatically.
     public func applySecrets(vin: String, token: String) {
+        let vinChanged = vin != (SecretsStore.tessieVIN ?? "")
         SecretsStore.save(vin: vin, token: token)
         Task {
             await tessie.updateCredentials(vin: vin, token: token)
+            if vinChanged { await resetLearnedEfficiency() }
             _ = try? await tessie.state(forceFresh: true)   // immediate validation poll
         }
+    }
+
+    /// Wipe everything learned about the current car (Wh/mi fit, charge-curve
+    /// residuals, watchdog state) and reseed from the configured car's own
+    /// drive history.
+    public func resetLearnedEfficiency() async {
+        learner = EfficiencyLearner()
+        curve = ChargeCurveModel(profile: pack)
+        planner = TripPlanner(curve: curve, energy: learner.model, pack: pack)
+        await engine.resetLearning()
+        didSeedEfficiency = false
+        await seedEfficiencyFromHistory()
+        lastPlanAt = .distantPast
+        if let s = latestState { maybeReplan(s) }
     }
 
     func tessieStatus() async -> TessieClient.ConnectionStatus {

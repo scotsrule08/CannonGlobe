@@ -171,6 +171,15 @@ public actor RecommendationEngine {
         teslaNavPlan = teslaNav
     }
 
+    /// Forget everything learned about the current car (charge-curve
+    /// residuals, watchdog state) — call when swapping vehicles.
+    public func resetLearning() {
+        let fresh = ChargeCurveModel(profile: curve.profile)
+        curve = fresh
+        watchdog = ChargeWatchdog(curve: fresh)
+        currentSession = nil
+    }
+
     /// Entry point for advisors computed outside the engine (charge coach,
     /// pace advice, precondition timing) — same arbitration and cooldowns.
     public func submit(kind: Recommendation.Kind, message: String,

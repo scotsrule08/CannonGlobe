@@ -9,6 +9,7 @@ struct SettingsView: View {
     @State private var token = SecretsStore.tessieToken ?? ""
     @State private var savedAt: Date?
     @State private var status = TessieClient.ConnectionStatus()
+    @State private var resetDone = false
 
     var body: some View {
         NavigationStack {
@@ -46,6 +47,21 @@ struct SettingsView: View {
                     } else {
                         Text("Stored in the iOS keychain on this phone only.")
                     }
+                }
+                Section {
+                    Button("Reset learned efficiency", role: .destructive) {
+                        resetDone = false
+                        Task {
+                            await model.resetLearnedEfficiency()
+                            resetDone = true
+                        }
+                    }
+                } header: {
+                    Text("Car swap")
+                } footer: {
+                    Text(resetDone
+                        ? "Reset complete. Reseeded from this car's own drive history."
+                        : "Changing the VIN resets this automatically. Use the button if you want a clean slate without changing cars: it wipes the learned Wh/mi fit and charge-curve corrections, then reseeds from the configured car's drive history.")
                 }
             }
             .navigationTitle("Settings")
