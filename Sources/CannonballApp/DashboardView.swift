@@ -81,6 +81,7 @@ struct BigNumber: View {
     public var minutesToStopText = "—"
     public var arrivalLabel = "ARRIVE SOC"
     public var minutesLabel = "MIN TO STOP"
+    public var tripDestinationName: String?
     public var whPerMiText = "—"
     public var efficiencyOnPlan = true
     public var deltaVsTeslaText = "—"

@@ -18,7 +18,9 @@ public struct TripPlanner: Sendable {
     /// Fixed per-stop overhead beyond detour: park, plug, handshake, unplug.
     let stopOverheadSeconds = 120.0
     /// Max sites to fan out to from any stop (corridor is nearly linear).
-    let maxFanOut = 8
+    /// Dynamic corridors thin dense metro clusters to ~10 mi spacing and
+    /// raise this so legs can still span 150+ mi.
+    public var maxFanOut = 8
 
     public init(curve: ChargeCurveModel, energy: EnergyModel, pack: PackProfile) {
         self.curve = curve; self.energy = energy; self.pack = pack

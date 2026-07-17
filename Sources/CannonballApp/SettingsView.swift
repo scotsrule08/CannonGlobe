@@ -21,7 +21,9 @@ struct SettingsView: View {
                 }
                 Section("Tessie") {
                     TextField("VIN", text: $vin)
+                    #if os(iOS)
                         .textInputAutocapitalization(.characters)
+                    #endif
                         .autocorrectionDisabled()
                         .font(.body.monospaced())
                     SecureField("API token", text: $token)

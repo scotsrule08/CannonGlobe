@@ -35,7 +35,7 @@ struct RootView: View {
 
     var body: some View {
         TabView(selection: $tab) {
-            DashboardView(model: model.dashboard)
+            DriveScreen(model: model, dashboard: model.dashboard)
                 .tag(Tab.drive)
                 .tabItem { Label("Drive", systemImage: "road.lanes") }
             ChargeScreenView(model: model.charge)

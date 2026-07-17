@@ -1,6 +1,18 @@
 import Foundation
 import CoreLocation
+import MapKit
 import CannonballCore
+
+public enum TripError: LocalizedError {
+    case noCarLocation, noRoute
+
+    public var errorDescription: String? {
+        switch self {
+        case .noCarLocation: "No car location yet — check the Tessie connection in Settings."
+        case .noRoute: "Couldn't route to that destination."
+        }
+    }
+}
 
 /// Run configuration. Real secrets live in the keychain / an untracked
 /// Secrets.plist — these are the wiring points, never committed values.
@@ -73,6 +85,82 @@ public final class AppModel {
         CarSnapshot(cloud: await tessie.latestCloudState(), pack: pack)
     }
 
+    // MARK: road trips — any origin, any destination
+
+    public private(set) var activeTrip: RouteCorridor?
+
+    public func startTrip(to destination: CLLocationCoordinate2D, named name: String) async throws {
+        guard let origin = await carCoordinate() else { throw TripError.noCarLocation }
+        let route = try await Self.route(from: origin, to: destination)
+        let chargers = try await SuperchargerDirectory.shared.sites()
+        guard let corridor = RouteCorridor.build(
+            routeCoordinates: route.coords,
+            expectedTravelSeconds: route.seconds,
+            destinationName: name,
+            chargers: chargers)
+        else { throw TripError.noRoute }
+
+        activeTrip = corridor
+        sites = corridor.sites
+        dashboard.tripDestinationName = name
+        dashboard.nextStopName = "Planning…"
+        UserDefaults.standard.set(name, forKey: "trip.name")
+        UserDefaults.standard.set(destination.latitude, forKey: "trip.lat")
+        UserDefaults.standard.set(destination.longitude, forKey: "trip.lon")
+        lastPlanSOC = -100; lastPlanAt = .distantPast
+        if let s = latestState { maybeReplan(s) }
+    }
+
+    public func endTrip() {
+        activeTrip = nil
+        sites = CorridorSeed.superchargers()
+        dashboard.tripDestinationName = nil
+        UserDefaults.standard.removeObject(forKey: "trip.name")
+        UserDefaults.standard.removeObject(forKey: "trip.lat")
+        UserDefaults.standard.removeObject(forKey: "trip.lon")
+        lastPlanSOC = -100; lastPlanAt = .distantPast
+        if let s = latestState { maybeReplan(s) }
+    }
+
+    /// Re-arm a saved trip once the car's position is known (app relaunch).
+    private func restoreSavedTrip() async {
+        guard let name = UserDefaults.standard.string(forKey: "trip.name") else { return }
+        let dest = CLLocationCoordinate2D(
+            latitude: UserDefaults.standard.double(forKey: "trip.lat"),
+            longitude: UserDefaults.standard.double(forKey: "trip.lon"))
+        for _ in 0..<12 {   // wait up to ~2 min for the first fix
+            try? await Task.sleep(for: .seconds(10))
+            guard activeTrip == nil else { return }
+            if await carCoordinate() != nil {
+                try? await startTrip(to: dest, named: name)
+                return
+            }
+        }
+    }
+
+    private func carCoordinate() async -> CLLocationCoordinate2D? {
+        if let s = latestState, s.coordinate.source != .deadReckoned {
+            return s.coordinate.value
+        }
+        if let c = await tessie.latestCloudState() {
+            return CLLocationCoordinate2D(latitude: c.latitude, longitude: c.longitude)
+        }
+        return nil
+    }
+
+    private static func route(from: CLLocationCoordinate2D, to: CLLocationCoordinate2D)
+        async throws -> (coords: [CLLocationCoordinate2D], seconds: Double) {
+        let request = MKDirections.Request()
+        request.source = MKMapItem(placemark: MKPlacemark(coordinate: from))
+        request.destination = MKMapItem(placemark: MKPlacemark(coordinate: to))
+        request.transportType = .automobile
+        let response = try await MKDirections(request: request).calculate()
+        guard let route = response.routes.first else { throw TripError.noRoute }
+        let buffer = route.polyline.points()
+        let coords = (0..<route.polyline.pointCount).map { buffer[$0].coordinate }
+        return (coords, route.expectedTravelTime)
+    }
+
     private func wire(config: RunConfig) {
         Task {
             await panda.start()
@@ -98,6 +186,7 @@ public final class AppModel {
         }
         // Hourly weather refresh; occupancy refresh at 90 s (docs §4.3/§4.5).
         Task { await refreshLoop() }
+        Task { await restoreSavedTrip() }
     }
 
     // MARK: replanning
@@ -108,10 +197,14 @@ public final class AppModel {
     private func maybeReplan(_ state: VehicleState) {
         let socDrift = abs(state.socPercent.value - lastPlanSOC)
         let age = Date().timeIntervalSince(lastPlanAt)
-        // Off-corridor refresh is a cheap passthrough of car data — keep the
+        // Off-plan refresh is a cheap passthrough of car data — keep the
         // ETA fresh; the full DP replan keeps the 5-minute cadence.
-        let maxAge = nearestSiteDistanceMi(of: state.coordinate.value)
-            > Self.offCorridorThresholdMi ? 15.0 : 300.0
+        let offPlan: Bool = if let trip = activeTrip {
+            trip.distanceToRouteMi(state.coordinate.value) > Self.offRouteThresholdMi
+        } else {
+            nearestSiteDistanceMi(of: state.coordinate.value) > Self.offCorridorThresholdMi
+        }
+        let maxAge = offPlan ? 15.0 : 300.0
         guard socDrift > 1.5 || age > maxAge else { return }
         lastPlanSOC = state.socPercent.value
         lastPlanAt = .init()
@@ -124,20 +217,41 @@ public final class AppModel {
     /// Corridor sites sit ≤ ~65 mi apart crow-flies; beyond this the car is
     /// genuinely off the run and the DP plan would be projection garbage.
     private static let offCorridorThresholdMi = 80.0
+    /// A user trip has the actual polyline, so the deviation test is tight.
+    private static let offRouteThresholdMi = 10.0
 
     private func replan(_ state: VehicleState) async {
-        if nearestSiteDistanceMi(of: state.coordinate.value) > Self.offCorridorThresholdMi {
-            let cloud = await tessie.latestCloudState()
-            await MainActor.run { self.dashboard.update(offCorridor: cloud) }
-            return
+        let coord = state.coordinate.value
+        let destinationMile: Double
+        let mile: Double
+        let legBuilder: TripPlanner.LegBuilder
+
+        if let trip = activeTrip {
+            guard trip.distanceToRouteMi(coord) <= Self.offRouteThresholdMi else {
+                let cloud = await tessie.latestCloudState()
+                await MainActor.run { self.dashboard.update(offCorridor: cloud) }
+                return
+            }
+            destinationMile = trip.destinationMile
+            mile = trip.mile(of: coord)
+            legBuilder = trip.legBuilder(ambientTempC: state.ambientTempC.value)
+        } else {
+            guard nearestSiteDistanceMi(of: coord) <= Self.offCorridorThresholdMi else {
+                let cloud = await tessie.latestCloudState()
+                await MainActor.run { self.dashboard.update(offCorridor: cloud) }
+                return
+            }
+            destinationMile = CorridorSeed.destinationMile
+            mile = await routeMile(of: coord)
+            legBuilder = await corridor.legBuilderSnapshot()
         }
-        let mile = await routeMile(of: state.coordinate.value)
-        let legBuilder = await corridor.legBuilderSnapshot()
+
         var freshPlanner = planner
         freshPlanner.curve = curve
         freshPlanner.energy = learner.model
+        freshPlanner.maxFanOut = activeTrip != nil ? 14 : 8
         let problem = TripPlanner.Problem(
-            sites: sites, destinationMile: CorridorSeed.destinationMile,
+            sites: sites, destinationMile: destinationMile,
             currentMile: mile, currentSOC: state.socPercent.value,
             cellTempC: (state.cellTempMinC.value, state.cellTempMaxC.value),
             legBuilder: legBuilder)
