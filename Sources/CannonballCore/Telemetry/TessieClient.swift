@@ -26,9 +26,14 @@ public struct CloudVehicleState: Sendable, Codable {
     public var usableBatteryLevel: Double?
     public var chargeLimitSOC: Double?
     public var minutesToFullCharge: Double?
-    /// BMS module temps from the fleet-telemetry stream (not in REST).
+    /// BMS module temps — Tessie serves these over REST and the stream.
     public var moduleTempMinC: Double?
     public var moduleTempMaxC: Double?
+    public var packVoltage: Double?
+    public var packCurrentA: Double?
+    public var energyRemainingKWh: Double?
+    /// Human model name from vehicle_config ("Model Y").
+    public var modelName: String?
 }
 
 public struct NearbyChargingSite: Sendable, Codable {
@@ -113,9 +118,9 @@ public actor TessieClient {
             .appending(queryItems: [.init(name: "use_cache", value: useCache ? "true" : "false")])
         do {
             var fresh = try await get(url, as: TessieStateDTO.self).toCloudState()
-            // Module temps only arrive via the stream — carry them across polls.
-            fresh.moduleTempMinC = cached?.moduleTempMinC
-            fresh.moduleTempMaxC = cached?.moduleTempMaxC
+            // REST usually carries module temps; fall back to streamed values.
+            fresh.moduleTempMinC = fresh.moduleTempMinC ?? cached?.moduleTempMinC
+            fresh.moduleTempMaxC = fresh.moduleTempMaxC ?? cached?.moduleTempMaxC
             lastPoll = .init(); cached = fresh
             status.lastUpdate = .init(); status.lastError = nil
             streamContinuation?.yield(fresh)
@@ -339,12 +344,19 @@ struct TessieStateDTO: Decodable {
         var usableBatteryLevel: Double?
         var chargeLimitSoc: Double?
         var minutesToFullCharge: Double?
+        // Tessie extends Fleet vehicle-data with live BMS values over REST.
+        var moduleTempMin: Double?
+        var moduleTempMax: Double?
+        var packVoltage: Double?
+        var packCurrent: Double?
+        var energyRemaining: Double?
+        var fastChargerPresent: Bool?
     }
     struct ClimateState: Decodable {
         var insideTemp: Double?; var outsideTemp: Double?
     }
     struct VehicleConfig: Decodable {
-        var carType: String?; var trimBadging: String?
+        var carType: String?; var trimBadging: String?; var model: String?
     }
     struct VehState: Decodable {
         var odometer: Double?; var vehicleName: String?
@@ -379,7 +391,12 @@ struct TessieStateDTO: Decodable {
             usableBatteryLevel: chargeState.usableBatteryLevel,
             chargeLimitSOC: chargeState.chargeLimitSoc,
             minutesToFullCharge: chargeState.minutesToFullCharge,
-            moduleTempMinC: nil, moduleTempMaxC: nil)
+            moduleTempMinC: chargeState.moduleTempMin,
+            moduleTempMaxC: chargeState.moduleTempMax,
+            packVoltage: chargeState.packVoltage,
+            packCurrentA: chargeState.packCurrent,
+            energyRemainingKWh: chargeState.energyRemaining,
+            modelName: vehicleConfig?.model)
     }
 }
 

@@ -97,6 +97,9 @@ public actor DataFusionEngine {
         fill(\.ambientTempC, s.outsideTempC, canStale: Freshness.canSlow)
         fill(\.cellTempMinC, s.moduleTempMinC, canStale: Freshness.canSlow)
         fill(\.cellTempMaxC, s.moduleTempMaxC, canStale: Freshness.canSlow)
+        fill(\.packVoltage, s.packVoltage, canStale: Freshness.canFast)
+        fill(\.packCurrentA, s.packCurrentA, canStale: Freshness.canFast)
+        fill(\.usableKWhRemaining, s.energyRemainingKWh, canStale: Freshness.canSlow)
         fill(\.cabinTempC, s.insideTempC, canStale: Freshness.canSlow)
         let charging = s.chargingState == "Charging" || s.chargingState == "Supercharging"
         fill(\.isDCFastCharging, charging, canStale: Freshness.canSlow)

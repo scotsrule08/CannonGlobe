@@ -66,7 +66,9 @@ struct CarView: View {
     @ViewBuilder
     private func navigationSection(_ cloud: CloudVehicleState) -> some View {
         Section("Navigation") {
-            if let dest = cloud.activeRouteDestination {
+            // The API keeps serving a finished route at 0 mi — treat as none.
+            if let dest = cloud.activeRouteDestination,
+               (cloud.activeRouteMilesToArrival ?? 0) > 0.5 {
                 LabeledContent("Destination", value: dest)
                 if let mins = cloud.activeRouteMinutesToArrival {
                     LabeledContent("ETA", value: etaText(minutes: mins))
@@ -112,7 +114,7 @@ struct CarView: View {
             parts.append(String(year))
         }
         parts.append("Tesla")
-        parts.append(Self.modelName(cloud.carType))
+        parts.append(cloud.modelName ?? Self.modelName(cloud.carType))
         if let trim = cloud.trimBadging?.uppercased(), !trim.isEmpty {
             parts.append(trim)
         }

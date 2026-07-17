@@ -14,6 +14,7 @@ let package = Package(
         .target(name: "CannonballCore"),
         // SwiftUI surfaces; thin layer over CannonballCore view-models.
         .target(name: "CannonballApp", dependencies: ["CannonballCore"]),
-        .testTarget(name: "CannonballCoreTests", dependencies: ["CannonballCore"]),
+        .testTarget(name: "CannonballCoreTests", dependencies: ["CannonballCore"],
+                    resources: [.copy("Fixtures")]),
     ]
 )
