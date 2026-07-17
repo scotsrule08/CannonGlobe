@@ -78,6 +78,23 @@ final class TripPlannerTests: XCTestCase {
         }
     }
 
+    func testLegsSpanConsecutiveStops() throws {
+        // Pass-through hops must be merged: legs[k] runs stop k-1 → stop k,
+        // so legs.first is current position → first REAL stop (time-to-stop
+        // and precondition timing depend on it).
+        let solution = try XCTUnwrap(planner.solve(makeProblem()))
+        XCTAssertEqual(solution.plan.legs.count, solution.plan.stops.count + 1)
+        let mileByID = Dictionary(uniqueKeysWithValues:
+            CorridorSeed.superchargers().map { ($0.id, $0.routeMile) })
+        var fromMile = 0.0
+        for (leg, stop) in zip(solution.plan.legs, solution.plan.stops) {
+            let stopMile = try XCTUnwrap(mileByID[stop.siteID])
+            XCTAssertEqual(leg.distanceMi, stopMile - fromMile, accuracy: 0.5,
+                           "leg into \(stop.siteID) must span from the previous stop")
+            fromMile = stopMile
+        }
+    }
+
     func testPinnedPlanIsNeverFaster() throws {
         let p = makeProblem()
         let optimal = try XCTUnwrap(planner.solve(p))

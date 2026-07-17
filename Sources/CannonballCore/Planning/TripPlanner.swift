@@ -165,17 +165,22 @@ public struct TripPlanner: Sendable {
         }
         guard let start = entry else { return nil }   // infeasible: caller must widen corridor
 
-        // Greedy reconstruction along the argmin chain.
+        // Greedy reconstruction along the argmin chain. Pass-through sites
+        // (t == b: drive by, charge nothing) are not stops, and their hops
+        // are merged so legs[k] always spans stop k-1 → stop k. In
+        // particular legs.first runs from the current position to the first
+        // REAL stop — time-to-stop and arrival-SOC consumers depend on this.
         var stops: [PlannedStop] = []
-        var legs: [RouteLeg] = [p.legBuilder(p.currentMile, ahead[start.index].routeMile)]
+        var legs: [RouteLeg] = []
+        var segmentStartMile = p.currentMile
         var (i, b) = start
         while i >= 0 {
             let (t, nextIndex) = choice[i][b]
             guard t >= 0 else { break }
             let c = calcs[i]
-            // t == b is a pass-through (drive by, charge nothing) — the DP
-            // charged it no overhead, so it is not a stop.
             if t > b {
+                legs.append(p.legBuilder(segmentStartMile, c.site.routeMile))
+                segmentStartMile = c.site.routeMile
                 stops.append(PlannedStop(
                     siteID: c.site.id,
                     arrivalSOC: soc(b), departureSOC: soc(t),
@@ -184,11 +189,10 @@ public struct TripPlanner: Sendable {
                     expectedQueueSeconds: queueSeconds(c.site)))
             }
             if nextIndex == -1 {
-                legs.append(p.legBuilder(c.site.routeMile, p.destinationMile))
+                legs.append(p.legBuilder(segmentStartMile, p.destinationMile))
                 break
             }
-            let (j, leg, kWh) = c.next.first { $0.index == nextIndex }!
-            legs.append(leg)
+            let (j, _, kWh) = c.next.first { $0.index == nextIndex }!
             let arrivalSOC = soc(t) - kWh / pack.usableKWh * 100
             (i, b) = (j, max(floorBucket, nearestBucket(arrivalSOC)))
         }

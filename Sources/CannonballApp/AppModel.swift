@@ -46,7 +46,11 @@ public final class AppModel {
     var pack: PackProfile = .us2025PremiumRWD     // re-detected from CAN at startup
     var curve: ChargeCurveModel
     var learner = EfficiencyLearner()
-    var preconditioner = PreconditionPlanner()
+    var preconditioner: PreconditionPlanner = {
+        var p = PreconditionPlanner()
+        p.targetWindowC = PackProfile.us2025PremiumRWD.idealSuperchargeCellTempC
+        return p
+    }()
     var planner: TripPlanner
     var sites = CorridorSeed.superchargers()
 
@@ -303,9 +307,10 @@ public final class AppModel {
                 "Slow down ~5 mph — trending to \(Int(predicted))% at \(siteName); the plan wants \(Int(stop.arrivalSOC))% on arrival.")
         }
 
-        // Preconditioning: timed against arrival cell temperature.
+        // Preconditioning: timed against arrival cell temperature. Only with
+        // real temps — the placeholder fused state must never trigger this.
         let minutesToStop = leg.trafficDriveSeconds / 60
-        if minutesToStop < 45 {
+        if minutesToStop < 45, state.cellTempMaxC.source != .deadReckoned {
             let advice = preconditioner.advise(cellTempMaxC: state.cellTempMaxC.value,
                                                ambientC: state.ambientTempC.value,
                                                minutesToArrival: minutesToStop)

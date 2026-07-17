@@ -20,9 +20,17 @@ public struct PreconditionPlanner: Sendable {
         public var predictedArrivalTempWithPrecondition: Double
     }
 
+    /// Effective heating rate: the battery heater fights the outside air, so
+    /// derate the warm-weather prior as ambient drops (≈1.0 above 15 °C,
+    /// ~0.73 at 0 °C, floor 0.45 in arctic air).
+    public func effectiveRateCPerMin(ambientC: Double) -> Double {
+        preconditionRateCPerMin * max(0.45, min(1.0, 1.0 - (15 - ambientC) * 0.018))
+    }
+
     public func advise(cellTempMaxC: Double, ambientC: Double,
                        minutesToArrival: Double) -> Advice {
         let hours = minutesToArrival / 60
+        let rate = effectiveRateCPerMin(ambientC: ambientC)
         let equilibrium = ambientC + 15
         let passive = cellTempMaxC + (equilibrium - cellTempMaxC)
             * min(1, passiveApproachPerHour * hours)
@@ -37,12 +45,13 @@ public struct PreconditionPlanner: Sendable {
                           predictedArrivalTempWithPrecondition: passive)
         }
 
-        // Minutes of active heating needed to hit the bottom of the window.
+        // Minutes of active heating needed to hit the bottom of the window,
+        // at the ambient-derated rate.
         let deficit = targetWindowC.lowerBound - passive
-        let heatMinutes = deficit / preconditionRateCPerMin
+        let heatMinutes = deficit / rate
         let slack = minutesToArrival - heatMinutes
         let withPrecondition = min(targetWindowC.lowerBound + 2,
-                                   passive + preconditionRateCPerMin * min(minutesToArrival, heatMinutes + 2))
+                                   passive + rate * min(minutesToArrival, heatMinutes + 2))
         if slack < -3 {
             // Can't reach the window; start anyway — every °C pays at the plug.
             return Advice(action: minutesToArrival > 2 ? .startNow : .tooLate,

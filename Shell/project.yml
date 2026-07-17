@@ -35,5 +35,4 @@ targets:
         NSLocalNetworkUsageDescription: Connects to the S3XY Commander CAN bridge on the car's Wi-Fi (192.168.4.1) for live pack telemetry.
         UIBackgroundModes:
           - location
-          - audio
           - processing
