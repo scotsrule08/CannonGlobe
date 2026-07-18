@@ -18,6 +18,8 @@ public struct CloudVehicleState: Sendable, Codable {
     public var activeRouteMilesToArrival: Double?
     /// The car's own trip-planner SOC prediction at the destination (%).
     public var activeRouteEnergyAtArrival: Double?
+    public var activeRouteLatitude: Double?
+    public var activeRouteLongitude: Double?
     public var displayName: String?
     public var carType: String?
     public var trimBadging: String?
@@ -375,6 +377,8 @@ struct TessieStateDTO: Decodable {
         var activeRouteMinutesToArrival: Double?
         var activeRouteMilesToArrival: Double?
         var activeRouteEnergyAtArrival: Double?
+        var activeRouteLatitude: Double?
+        var activeRouteLongitude: Double?
     }
     struct ChargeState: Decodable {
         var batteryLevel: Double; var batteryRange: Double
@@ -422,6 +426,8 @@ struct TessieStateDTO: Decodable {
             activeRouteMinutesToArrival: driveState.activeRouteMinutesToArrival,
             activeRouteMilesToArrival: driveState.activeRouteMilesToArrival,
             activeRouteEnergyAtArrival: driveState.activeRouteEnergyAtArrival,
+            activeRouteLatitude: driveState.activeRouteLatitude,
+            activeRouteLongitude: driveState.activeRouteLongitude,
             displayName: displayName ?? vehicleState?.vehicleName,
             carType: vehicleConfig?.carType,
             trimBadging: vehicleConfig?.trimBadging,

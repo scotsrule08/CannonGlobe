@@ -13,7 +13,9 @@ public struct CompareScreenView: View {
             headline
             HStack(alignment: .top, spacing: 12) {
                 planColumn(title: "APP PLAN", rows: model.optimizedRows, tint: .cyan)
-                planColumn(title: "TESLA NAV", rows: model.teslaRows, tint: .secondary)
+                if model.teslaPlanAvailable {
+                    planColumn(title: "TESLA NAV", rows: model.teslaRows, tint: .secondary)
+                }
             }
             Spacer(minLength: 0)
         }
@@ -22,7 +24,12 @@ public struct CompareScreenView: View {
 
     private var headline: some View {
         Group {
-            if let delta = model.headlineDelta {
+            if !model.teslaPlanAvailable {
+                Label("No Tesla Nav charging stop visible to compare",
+                      systemImage: "eye.slash")
+                    .font(.headline)
+                    .foregroundStyle(.secondary)
+            } else if let delta = model.headlineDelta {
                 Label(delta, systemImage: "bolt.badge.clock.fill")
                     .font(.title.weight(.black))
                     .foregroundStyle(.cyan)
@@ -73,6 +80,7 @@ public struct CompareScreenView: View {
     public var optimizedRows: [StopRow] = []
     public var teslaRows: [StopRow] = []
     public var headlineDelta: String?
+    public var teslaPlanAvailable = false
     public var siteNames: [String: String] = [:]
     public var siteAmenities: [String: String] = [:]
 
@@ -83,6 +91,7 @@ public struct CompareScreenView: View {
         self.siteNames = siteNames
         optimizedRows = rows(for: optimized)
         teslaRows = teslaNav.map(rows(for:)) ?? []
+        teslaPlanAvailable = teslaNav != nil
         if let tesla = teslaNav {
             let delta = tesla.totalRemainingSeconds - optimized.totalRemainingSeconds
             headlineDelta = delta > 60
@@ -99,7 +108,7 @@ public struct CompareScreenView: View {
             StopRow(
                 id: "\(stop.siteID)-\(i)",
                 name: siteNames[stop.siteID] ?? stop.siteID,
-                detail: "arr \(Int(stop.arrivalSOC))% · chg \(Int(stop.chargeSeconds / 60)) min → \(Int(stop.departureSOC))%",
+                detail: "arr \(Int(stop.arrivalSOC))% · chg \(max(1, Int((stop.chargeSeconds / 60).rounded()))) min → \(Int(stop.departureSOC))%",
                 amenity: siteAmenities[stop.siteID],
                 totalText: i == 0 ? total : nil)
         }

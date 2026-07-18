@@ -21,6 +21,12 @@ public struct TripPlanner: Sendable {
     /// Dynamic corridors thin dense metro clusters to ~10 mi spacing and
     /// raise this so legs can still span 150+ mi.
     public var maxFanOut = 8
+    /// A stop must add at least this many SOC buckets (3 × 2% = 6%). Paying
+    /// stop overhead for a sliver of charge is never right, and without this
+    /// floor the DP tie-breaks sliver top-ups onto high-SOC sites where the
+    /// rate difference is only seconds. With it, the charge curve makes the
+    /// late low-SOC site win decisively.
+    public var minChargeBuckets = 3
 
     public init(curve: ChargeCurveModel, energy: EnergyModel, pack: PackProfile) {
         self.curve = curve; self.energy = energy; self.pack = pack
@@ -110,6 +116,8 @@ public struct TripPlanner: Sendable {
                 var best = inf
                 var bestChoice = (target: -1, nextIndex: -2)
                 for t in b..<buckets {
+                    // Either pass through (t == b) or charge meaningfully.
+                    if t > b && t - b < minChargeBuckets { continue }
                     let chargeSec = c.chargeCum[t] - c.chargeCum[b]
                     let socOut = soc(t)
                     // Option A: run for the destination.

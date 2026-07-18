@@ -768,10 +768,21 @@ public final class AppModel {
             }
     }
 
+    /// The car's nav counts as "planning a charging stop" ONLY when its route
+    /// destination is literally a Supercharger (coordinate match). String
+    /// matching against site names fabricates stops — "Samsung AUSTIN
+    /// Semiconductor" once matched an Austin site — and the car's own
+    /// intermediate charging stops are not visible over the API at all.
     private func teslaNavSiteID() async -> String? {
-        // Fleet active_route destination → nearest corridor site match.
-        guard let dest = try? await tessie.state().activeRouteDestination else { return nil }
-        return sites.first { dest.localizedCaseInsensitiveContains($0.name.split(separator: ",").first ?? "") }?.id
+        guard let cloud = await tessie.latestCloudState(),
+              let lat = cloud.activeRouteLatitude,
+              let lon = cloud.activeRouteLongitude,
+              (cloud.activeRouteMilesToArrival ?? 0) > 0.5 else { return nil }
+        let dest = CLLocation(latitude: lat, longitude: lon)
+        return sites.first { site in
+            dest.distance(from: CLLocation(latitude: site.coordinate.latitude,
+                                           longitude: site.coordinate.longitude)) < 1200
+        }?.id
     }
 
     private func nearestSiteDistanceMi(of coord: CLLocationCoordinate2D) -> Double {

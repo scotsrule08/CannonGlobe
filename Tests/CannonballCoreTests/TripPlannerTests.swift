@@ -38,9 +38,10 @@ final class TripPlannerTests: XCTestCase {
         // 2,790 mi at 70 mph ≈ 39.9 h drive; total with charging < 46 h.
         XCTAssertGreaterThan(solution.plan.totalRemainingSeconds, 39 * 3600)
         XCTAssertLessThan(solution.plan.totalRemainingSeconds, 46 * 3600)
-        // NCA taper economics: roughly 9–14 stops, not 5 long ones.
+        // NCA taper economics: many short peak-zone stops, not 5 long ones.
+        // (16 with the measured Highland curve + the 6% minimum-charge floor.)
         XCTAssertGreaterThanOrEqual(solution.plan.stops.count, 8)
-        XCTAssertLessThanOrEqual(solution.plan.stops.count, 15)
+        XCTAssertLessThanOrEqual(solution.plan.stops.count, 16)
     }
 
     func testNoStopChargesHigh() throws {
@@ -93,6 +94,37 @@ final class TripPlannerTests: XCTestCase {
                            "leg into \(stop.siteID) must span from the previous stop")
             fromMile = stopMile
         }
+    }
+
+    func testTinyTopUpPrefersLateLowSOCStop() throws {
+        // Fort Worth → Taylor regression: the trip is only a sliver short of
+        // direct, and the planner once answered with a 2% top-up at 42% SOC
+        // at the EARLY site. Required behavior: charge meaningfully (≥ 6%)
+        // at the LATE site, arriving low where the curve is fastest.
+        func site(_ id: String, mile: Double) -> Supercharger {
+            Supercharger(id: id, name: id,
+                         coordinate: .init(latitude: 32, longitude: -97),
+                         version: .v3, stallCount: 12,
+                         detourSecondsWestbound: 240, detourSecondsEastbound: 240,
+                         occupancy: .unknown, healthScore: 1.0, routeMile: mile)
+        }
+        let energy = EnergyModel()
+        let needSOC = energy.predict(leg: Self.flatBuilder(0, 120)).kWh
+            / pack.usableKWh * 100
+        let problem = TripPlanner.Problem(
+            sites: [site("early", mile: 40), site("late", mile: 90)],
+            destinationMile: 120, currentMile: 0,
+            currentSOC: needSOC + pack.bufferFloorSOC - 2,   // 2% short of direct
+            cellTempC: (min: 25, max: 28),
+            legBuilder: Self.flatBuilder)
+        let solution = try XCTUnwrap(planner.solve(problem))
+        XCTAssertEqual(solution.plan.stops.count, 1)
+        let stop = try XCTUnwrap(solution.plan.stops.first)
+        XCTAssertEqual(stop.siteID, "late",
+                       "the fix must choose the low-arrival-SOC site")
+        XCTAssertLessThan(stop.arrivalSOC, 20, "plug in deep in the peak zone")
+        XCTAssertGreaterThanOrEqual(stop.departureSOC - stop.arrivalSOC, 5.9,
+                                    "no sliver top-ups — a stop must charge meaningfully")
     }
 
     func testPinnedPlanIsNeverFaster() throws {
