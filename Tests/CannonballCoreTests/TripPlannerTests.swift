@@ -140,6 +140,8 @@ final class TripPlannerTests: XCTestCase {
                 pinned.plan.totalRemainingSeconds + 1,
                 optimal.plan.totalRemainingSeconds,
                 "the optimizer must never lose to a pinned plan")
+            XCTAssertEqual(pinned.plan.stops.first?.siteID, otherSite.id,
+                "pinning must force a CHARGE at the pinned site, not a drive-by")
         }
     }
 }

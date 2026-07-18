@@ -561,8 +561,12 @@ public final class AppModel {
             legBuilder: ctx.legBuilder)
         guard let solution = freshPlanner.solve(problem) else { return }
         let pinned: TripPlanner.Solution?
-        if let navSite = await teslaNavSiteID(), navSite != solution.plan.stops.first?.siteID {
-            pinned = freshPlanner.solvePinned(problem, firstStopID: navSite)
+        if let navSite = await teslaNavSiteID() {
+            // Same first stop → the plans genuinely agree; show ours as the
+            // nav plan instead of pretending no comparison exists.
+            pinned = navSite == solution.plan.stops.first?.siteID
+                ? solution
+                : freshPlanner.solvePinned(problem, firstStopID: navSite)
         } else {
             pinned = nil
         }

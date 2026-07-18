@@ -112,12 +112,18 @@ public struct TripPlanner: Sendable {
             let c = calcs[i]
             let overhead = stopDetourSeconds(c.site, westbound: p.westbound)
                 + queueSeconds(c.site) + stopOverheadSeconds
+            // Pinning means "the car CHARGES here" — without this, the DP
+            // routes through the pinned site and charges somewhere better,
+            // silently un-pinning the comparison.
+            let mustChargeHere = p.entryRestrictedTo == c.site.id
             for b in floorBucket..<buckets {
                 var best = inf
                 var bestChoice = (target: -1, nextIndex: -2)
                 for t in b..<buckets {
                     // Either pass through (t == b) or charge meaningfully.
-                    if t > b && t - b < minChargeBuckets { continue }
+                    if t == b {
+                        if mustChargeHere { continue }
+                    } else if t - b < minChargeBuckets { continue }
                     let chargeSec = c.chargeCum[t] - c.chargeCum[b]
                     let socOut = soc(t)
                     // Option A: run for the destination.
