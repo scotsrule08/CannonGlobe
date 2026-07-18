@@ -73,6 +73,27 @@ final class PandaClientTests: XCTestCase {
         XCTAssertEqual(full, 75.0, accuracy: 0.01)
     }
 
+    func testSubscribePacketFormat() {
+        // 0x0f header, then [0xff, idHi, idLo] per CAN ID (Commander protocol).
+        let packet = PandaClient.subscribePacket(ids: [0x132, 0x2D2])
+        XCTAssertEqual(Array(packet), [0x0f,
+                                       0xff, 0x01, 0x32,
+                                       0xff, 0x02, 0xD2])
+    }
+
+    func testAckFrameIsRecognized() {
+        // Bus 15, frame 6 = the Commander ACK that triggers subscription.
+        let rir = UInt32(6) << 21
+        let rdtr = UInt32(0) | (UInt32(15) << 4)   // dlc 0, bus 15
+        var d = Data()
+        for shift in stride(from: 0, to: 32, by: 8) { d.append(UInt8((rir >> shift) & 0xFF)) }
+        for shift in stride(from: 0, to: 32, by: 8) { d.append(UInt8((rdtr >> shift) & 0xFF)) }
+        d.append(contentsOf: repeatElement(0, count: 8))
+        let frame = PandaClient.parseRecords(d)[0]
+        XCTAssertEqual(frame.bus, 15)
+        XCTAssertEqual(frame.address, 6)
+    }
+
     func testUnknownAddressDecodesNothing() {
         let frame = PandaClient.parseRecords(record(address: 0x7FF, payload: [1, 2, 3]))[0]
         XCTAssertTrue(CANDecoder().decode(frame).isEmpty)

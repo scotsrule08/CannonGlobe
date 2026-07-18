@@ -89,10 +89,30 @@ public actor PandaClient {
         return stats
     }
 
+    /// CAN IDs to subscribe to — the Commander forwards ONLY these. Covers
+    /// every ID the decoder understands (pack V/A, SOC, energy, cell temps,
+    /// BMS limits). Extend alongside CANDecoder.
+    public static let subscribeIDs: [UInt32] = [0x132, 0x33A, 0x352, 0x312, 0x2D2,
+                                                0x257, 0x293, 0x3D2, 0x321]
+
     public init() {
         signals = AsyncStream { self.continuation = $0 }
         connectionStates = AsyncStream { self.stateContinuation = $0 }
     }
+
+    /// Commander Panda subscription packet: 0x0f header, then [0xff, idHi, idLo]
+    /// per CAN ID (max 43 per datagram — our list is far smaller).
+    static func subscribePacket(ids: [UInt32]) -> Data {
+        var packet = Data([0x0f])
+        for id in ids {
+            packet.append(0xff)
+            packet.append(UInt8((id >> 8) & 0xFF))
+            packet.append(UInt8(id & 0xFF))
+        }
+        return packet
+    }
+
+    private static let handshake = Data("ehllo".utf8)
 
     public func start(endpoint: NWEndpoint = PandaClient.defaultEndpoint) {
         guard connection == nil else { return }
@@ -111,12 +131,12 @@ public actor PandaClient {
         }
         conn.start(queue: .global(qos: .userInitiated))
         receiveLoop(conn)
-        // Heartbeat every 2 s keeps the broadcast subscription alive and
-        // doubles as the liveness probe: no frames for 6 s ⇒ .lost.
+        // "ehllo" every 1 s keeps the session alive (Commander drops it after
+        // 5 s of silence) and doubles as the liveness probe.
         heartbeatTask = Task { [weak self] in
             while !Task.isCancelled {
                 await self?.sendHeartbeat()
-                try? await Task.sleep(for: .seconds(2))
+                try? await Task.sleep(for: .seconds(1))
                 await self?.checkLiveness()
             }
         }
@@ -138,7 +158,12 @@ public actor PandaClient {
     }
 
     private func sendHeartbeat() {
-        connection?.send(content: Data([0x00]), completion: .idempotent)
+        connection?.send(content: Self.handshake, completion: .idempotent)
+    }
+
+    private func sendSubscription() {
+        connection?.send(content: Self.subscribePacket(ids: Self.subscribeIDs),
+                         completion: .idempotent)
     }
 
     private func checkLiveness() {
@@ -168,11 +193,17 @@ public actor PandaClient {
 
     private func ingest(datagram: Data) {
         lastFrameAt = .init()
-        if state != .streaming { setState(.streaming) }
         datagramCount += 1
         for frame in Self.parseRecords(datagram) {
+            // Panda ACK (bus 15, frame 6): our cue to (re)send the CAN-ID
+            // subscription. Until we do, the Commander streams nothing.
+            if frame.bus == 15 && frame.address == 6 {
+                sendSubscription()
+                continue
+            }
             frameCount += 1
             addressCounts[frame.address, default: 0] += 1
+            if state != .streaming { setState(.streaming) }
             for signal in decoder.decode(frame) {
                 signalCount += 1
                 continuation?.yield(signal)

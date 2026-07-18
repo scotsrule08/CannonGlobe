@@ -57,6 +57,10 @@ public enum BridgeProbe {
         }
         results.append(await posix { posixUDP(host: host, port: 1338, timeout: 3) })
 
+        // The real Commander Panda protocol over POSIX: ehllo → ACK →
+        // subscribe → stream. This is the definitive "is CAN flowing" test.
+        results.append(await posix { pandaHandshake(host: host, seconds: 5) })
+
         results.append(await probeHTTP(host: host))
 
         // Host is alive but the guessed ports are closed — sweep to find the
@@ -327,6 +331,75 @@ public enum BridgeProbe {
             }
         }
         return Result(label: label, outcome: "CONNECTED, no data", success: true)
+    }
+
+    /// Full Commander Panda handshake over a POSIX UDP socket bound to en0:
+    /// "ehllo", answer the ACK (bus 15 / frame 6) with a CAN-ID subscription,
+    /// then count decoded frames. This is the ground-truth that the protocol
+    /// and endpoint are right, independent of Network.framework.
+    static func pandaHandshake(host: String, seconds: Double) -> Result {
+        let label = "Panda handshake"
+        guard var addr = makeSockaddr(host: host, port: 1338) else {
+            return Result(label: label, outcome: "bad host", success: false)
+        }
+        let fd = socket(AF_INET, SOCK_DGRAM, 0)
+        guard fd >= 0 else {
+            return Result(label: label, outcome: "socket: \(errnoText(errno))", success: false)
+        }
+        defer { close(fd) }
+        bindToWiFi(fd)
+        func sendTo(_ data: Data) {
+            _ = data.withUnsafeBytes { bytes in
+                withUnsafePointer(to: &addr) { p in
+                    p.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                        sendto(fd, bytes.baseAddress, data.count, 0, $0,
+                               socklen_t(MemoryLayout<sockaddr_in>.size))
+                    }
+                }
+            }
+        }
+        let ehllo = Data("ehllo".utf8)
+        let subscribe = PandaClient.subscribePacket(ids: PandaClient.subscribeIDs)
+        sendTo(ehllo)
+
+        let deadline = Date().addingTimeInterval(seconds)
+        var lastEhllo = Date()
+        var frames = 0
+        var subscribed = false
+        var idsSeen = Set<UInt32>()
+        var buffer = [UInt8](repeating: 0, count: 8192)
+
+        while Date() < deadline {
+            var pfd = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
+            if poll(&pfd, 1, 300) > 0 {
+                let n = recv(fd, &buffer, buffer.count, 0)
+                if n > 0 {
+                    for frame in PandaClient.parseRecords(Data(buffer[0..<n])) {
+                        if frame.bus == 15 && frame.address == 6 {
+                            sendTo(subscribe); subscribed = true
+                        } else {
+                            frames += 1
+                            idsSeen.insert(frame.address)
+                        }
+                    }
+                }
+            }
+            if Date().timeIntervalSince(lastEhllo) > 1 {
+                sendTo(ehllo); lastEhllo = Date()
+            }
+        }
+
+        if frames > 0 {
+            let ids = idsSeen.sorted().prefix(6)
+                .map { String(format: "0x%03X", $0) }.joined(separator: " ")
+            return Result(label: label,
+                          outcome: "STREAMING — \(frames) frames, IDs: \(ids)",
+                          success: true)
+        }
+        if subscribed {
+            return Result(label: label, outcome: "ACK+subscribed but no CAN frames", success: false)
+        }
+        return Result(label: label, outcome: "no ACK from Commander", success: false)
     }
 
     static func posixUDP(host: String, port: UInt16, timeout: Double) -> Result {
