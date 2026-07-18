@@ -33,10 +33,15 @@ public struct PackProfile: Sendable {
         usableKWh: 75.0,
         nominalVoltage: 346,
         peakDCkW: 250,
+        // Anchors traced from measured 2024 M3 LR RWD (Highland) fast-charge
+        // test data: 250 kW plateau holds 3-17%, decline is gentler through
+        // 25% than the old prior assumed, and the top is slightly slower.
+        // Degradation level is absorbed by usableKWh + residual learning.
         baseCurve: [
-            (0, 130), (5, 240), (10, 250), (15, 235), (20, 200), (25, 180),
-            (30, 160), (40, 132), (50, 108), (60, 90), (70, 74), (80, 58),
-            (90, 38), (97, 22), (100, 5),
+            (0, 165), (2, 240), (3, 250), (7, 250), (10, 245), (12, 240),
+            (17, 240), (20, 228), (25, 205), (30, 185), (35, 165), (40, 143),
+            (45, 125), (50, 108), (55, 100), (60, 92), (65, 82), (70, 72),
+            (75, 62), (80, 50), (85, 44), (90, 33), (95, 20), (100, 2),
         ],
         coldFactor: [(-10, 0.15), (0, 0.35), (10, 0.65), (20, 0.90), (25, 1.0), (45, 1.0)],
         hotFactor: [(45, 1.0), (50, 0.85), (55, 0.60), (60, 0.40)],

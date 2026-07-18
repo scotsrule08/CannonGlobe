@@ -5,10 +5,14 @@ final class ChargeCurveTests: XCTestCase {
     let model = ChargeCurveModel(profile: .us2025PremiumRWD)
 
     func testPeakPowerAtLowSOC() {
+        // Shape per measured 2024 M3 LR RWD data: the 250 kW plateau holds
+        // 3-17%, ~228 kW at 20%, and the taper clearly bites by 30%.
         let kW = model.vehicleExpectedKW(soc: 10, cellTempMinC: 30, cellTempMaxC: 35)
-        XCTAssertEqual(kW, 250, accuracy: 5, "warm pack at ~10% should hit the 250 kW peak")
+        XCTAssertEqual(kW, 245, accuracy: 6, "warm pack at ~10% sits on the peak plateau")
         let at20 = model.vehicleExpectedKW(soc: 20, cellTempMinC: 30, cellTempMaxC: 35)
-        XCTAssertLessThan(at20, 215, "NCA taper must already bite by 20% — the peak is brief")
+        XCTAssertEqual(at20, 228, accuracy: 8, "20% is still near-peak on the Highland pack")
+        let at30 = model.vehicleExpectedKW(soc: 30, cellTempMinC: 30, cellTempMaxC: 35)
+        XCTAssertLessThan(at30, 200, "taper must bite by 30%")
     }
 
     func testTaperIsMonotonicAbovePlateau() {
