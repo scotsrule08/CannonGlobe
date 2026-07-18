@@ -1,5 +1,8 @@
 import SwiftUI
 import CannonballCore
+#if os(iOS)
+import UIKit
+#endif
 
 /// Tessie credential entry — keychain-persisted, applied to the live client
 /// without a restart.
@@ -122,6 +125,19 @@ struct SettingsView: View {
                                 }
                             }
                         }
+                        #if os(iOS)
+                        if probeResults.contains(where: { $0.outcome.contains("Local Network") || $0.outcome.contains("Network is down") }) {
+                            Button {
+                                if let url = URL(string: UIApplication.openSettingsURLString) {
+                                    UIApplication.shared.open(url)
+                                }
+                            } label: {
+                                Label("Open CannonGlobe settings to allow Local Network",
+                                      systemImage: "lock.open")
+                                    .font(.callout.weight(.semibold))
+                            }
+                        }
+                        #endif
                     }
                 } header: {
                     Text("CAN bridge")

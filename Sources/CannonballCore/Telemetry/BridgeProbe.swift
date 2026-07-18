@@ -76,6 +76,8 @@ public enum BridgeProbe {
         case .posix(.EHOSTUNREACH): return "host unreachable"
         case .posix(.ENETUNREACH): return "network unreachable (wrong Wi-Fi?)"
         case .posix(.ETIMEDOUT): return "timed out"
+        case .posix(.ENETDOWN):
+            return "BLOCKED by iOS Local Network permission — allow CannonGlobe in Settings"
         default: return "failed: \(error.localizedDescription)"
         }
     }
