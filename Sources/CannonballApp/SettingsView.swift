@@ -144,17 +144,56 @@ struct SettingsView: View {
                             Text(ble.stateText).font(.caption).foregroundStyle(.secondary)
                         }
                         ForEach(ble.devices) { d in
-                            VStack(alignment: .leading, spacing: 1) {
-                                HStack {
-                                    Text(d.name).font(.caption.weight(.semibold))
-                                    Spacer()
-                                    Text("\(d.rssi) dBm").font(.caption2.monospaced())
-                                        .foregroundStyle(.secondary)
+                            Button {
+                                ble.inspect(d)
+                            } label: {
+                                VStack(alignment: .leading, spacing: 1) {
+                                    HStack {
+                                        Text(d.name).font(.caption.weight(.semibold))
+                                        if d.name.hasPrefix("ENH") || d.name.contains("S3XY")
+                                            || d.name.contains("CAN") {
+                                            Image(systemName: "star.fill")
+                                                .font(.caption2).foregroundStyle(.yellow)
+                                        }
+                                        Spacer()
+                                        Text("\(d.rssi) dBm").font(.caption2.monospaced())
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    if !d.services.isEmpty {
+                                        Text("services: " + d.services.joined(separator: ", "))
+                                            .font(.caption2.monospaced())
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Text("tap to inspect").font(.caption2).foregroundStyle(.blue)
                                 }
-                                if !d.services.isEmpty {
-                                    Text("services: " + d.services.joined(separator: ", "))
-                                        .font(.caption2.monospaced())
-                                        .foregroundStyle(.secondary)
+                            }
+                        }
+                        if !ble.inspectName.isEmpty {
+                            Divider()
+                            HStack {
+                                Text(ble.inspectName).font(.caption.weight(.bold))
+                                Spacer()
+                                Button("Disconnect") { ble.disconnect() }
+                                    .font(.caption)
+                            }
+                            Text(ble.inspectState).font(.caption2).foregroundStyle(.secondary)
+                            ForEach(ble.chars) { c in
+                                VStack(alignment: .leading, spacing: 1) {
+                                    HStack {
+                                        Text(shortUUID(c.characteristic))
+                                            .font(.caption2.monospaced().weight(.semibold))
+                                        Text(c.properties).font(.caption2)
+                                            .foregroundStyle(c.notifying ? .green : .secondary)
+                                        Spacer()
+                                        if c.packets > 0 {
+                                            Text("\(c.packets) pkt").font(.caption2.monospaced())
+                                                .foregroundStyle(.green)
+                                        }
+                                    }
+                                    if !c.lastBytes.isEmpty {
+                                        Text(c.lastBytes).font(.caption2.monospaced())
+                                            .foregroundStyle(.secondary)
+                                    }
                                 }
                             }
                         }
@@ -191,6 +230,11 @@ struct SettingsView: View {
                 }
             }
         }
+    }
+
+    /// Short-form a 128-bit UUID to its distinguishing head, keep 16-bit whole.
+    private func shortUUID(_ uuid: String) -> String {
+        uuid.count > 8 ? String(uuid.prefix(8)) : uuid
     }
 
     private var bridgeColor: Color {
