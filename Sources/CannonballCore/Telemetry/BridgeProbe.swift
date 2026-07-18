@@ -41,8 +41,32 @@ public enum BridgeProbe {
             results.append(describe("TCP \(port)\(sendATI ? " (ELM327 ATI)" : "")", r))
         }
 
+        // Unpinned NW attempt — rules out the .wifi interface requirement.
+        let unpinned = await attempt(host: host, port: 35000, tcp: true,
+                                     payload: Data("ATI\r".utf8), settle: 2.5,
+                                     pinWiFi: false)
+        results.append(describe("TCP 35000 (no iface pin)", unpinned))
+
+        // Raw POSIX sockets bound to en0 — bypasses Network.framework path
+        // logic entirely. If these work where NW fails, we build on POSIX.
+        for (port, sendATI) in [(UInt16(35000), true), (3333, true)] {
+            results.append(await posix {
+                posixTCP(host: host, port: port,
+                         payload: sendATI ? Data("ATI\r".utf8) : nil, timeout: 3)
+            })
+        }
+        results.append(await posix { posixUDP(host: host, port: 1338, timeout: 3) })
+
         results.append(await probeHTTP(host: host))
         return results
+    }
+
+    private static func posix(_ body: @escaping @Sendable () -> Result) async -> Result {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                continuation.resume(returning: body())
+            }
+        }
     }
 
     // MARK: - internals
@@ -83,11 +107,13 @@ public enum BridgeProbe {
     }
 
     private static func attempt(host: String, port: UInt16, tcp: Bool,
-                                payload: Data?, settle: Double) async
+                                payload: Data?, settle: Double,
+                                pinWiFi: Bool = true) async
         -> (connected: Bool, reply: Data?, note: String?) {
         await withCheckedContinuation { continuation in
             let params: NWParameters = tcp ? .tcp : .udp
-            params.requiredInterfaceType = .wifi
+            if pinWiFi { params.requiredInterfaceType = .wifi }
+            params.prohibitedInterfaceTypes = [.cellular]
             let conn = NWConnection(
                 to: .hostPort(host: NWEndpoint.Host(host),
                               port: NWEndpoint.Port(rawValue: port)!),
@@ -183,6 +209,114 @@ public enum BridgeProbe {
         } catch {
             return Result(label: "HTTP 80", outcome: "no response", success: false)
         }
+    }
+
+    // MARK: POSIX probes (bound to en0, bypassing Network.framework)
+
+    private static func makeSockaddr(host: String, port: UInt16) -> sockaddr_in? {
+        var addr = sockaddr_in()
+        addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        addr.sin_family = sa_family_t(AF_INET)
+        addr.sin_port = port.bigEndian
+        guard inet_pton(AF_INET, host, &addr.sin_addr) == 1 else { return nil }
+        return addr
+    }
+
+    private static func bindToWiFi(_ fd: Int32) {
+        var index = if_nametoindex("en0")
+        guard index != 0 else { return }
+        setsockopt(fd, IPPROTO_IP, IP_BOUND_IF, &index,
+                   socklen_t(MemoryLayout<UInt32>.size))
+    }
+
+    private static func errnoText(_ code: Int32) -> String {
+        "\(String(cString: strerror(code))) (errno \(code))"
+    }
+
+    static func posixTCP(host: String, port: UInt16, payload: Data?,
+                         timeout: Double) -> Result {
+        let label = "POSIX TCP \(port)"
+        guard var addr = makeSockaddr(host: host, port: port) else {
+            return Result(label: label, outcome: "bad host", success: false)
+        }
+        let fd = socket(AF_INET, SOCK_STREAM, 0)
+        guard fd >= 0 else {
+            return Result(label: label, outcome: "socket: \(errnoText(errno))", success: false)
+        }
+        defer { close(fd) }
+        bindToWiFi(fd)
+        let flags = fcntl(fd, F_GETFL)
+        _ = fcntl(fd, F_SETFL, flags | O_NONBLOCK)
+        let rc = withUnsafePointer(to: &addr) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+        if rc != 0 && errno != EINPROGRESS {
+            return Result(label: label, outcome: "connect: \(errnoText(errno))", success: false)
+        }
+        var pfd = pollfd(fd: fd, events: Int16(POLLOUT), revents: 0)
+        guard poll(&pfd, 1, Int32(timeout * 1000)) > 0 else {
+            return Result(label: label, outcome: "connect timed out", success: false)
+        }
+        var soError: Int32 = 0
+        var len = socklen_t(MemoryLayout<Int32>.size)
+        getsockopt(fd, SOL_SOCKET, SO_ERROR, &soError, &len)
+        guard soError == 0 else {
+            let hint = soError == ECONNREFUSED ? " — host ALIVE, port closed" : ""
+            return Result(label: label, outcome: errnoText(soError) + hint,
+                          success: soError == ECONNREFUSED)
+        }
+        if let payload {
+            _ = payload.withUnsafeBytes { send(fd, $0.baseAddress, payload.count, 0) }
+        }
+        var rfd = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
+        if poll(&rfd, 1, Int32(timeout * 1000)) > 0 {
+            var buffer = [UInt8](repeating: 0, count: 512)
+            let n = recv(fd, &buffer, buffer.count, 0)
+            if n > 0 {
+                return Result(label: label,
+                              outcome: "reply: \(preview(Data(buffer[0..<n])))",
+                              success: true)
+            }
+        }
+        return Result(label: label, outcome: "CONNECTED, no data", success: true)
+    }
+
+    static func posixUDP(host: String, port: UInt16, timeout: Double) -> Result {
+        let label = "POSIX UDP \(port)"
+        guard var addr = makeSockaddr(host: host, port: port) else {
+            return Result(label: label, outcome: "bad host", success: false)
+        }
+        let fd = socket(AF_INET, SOCK_DGRAM, 0)
+        guard fd >= 0 else {
+            return Result(label: label, outcome: "socket: \(errnoText(errno))", success: false)
+        }
+        defer { close(fd) }
+        bindToWiFi(fd)
+        let heartbeat = Data([0x00])
+        let sent = heartbeat.withUnsafeBytes { bytes in
+            withUnsafePointer(to: &addr) { pointer in
+                pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                    sendto(fd, bytes.baseAddress, heartbeat.count, 0, $0,
+                           socklen_t(MemoryLayout<sockaddr_in>.size))
+                }
+            }
+        }
+        guard sent >= 0 else {
+            return Result(label: label, outcome: "sendto: \(errnoText(errno))", success: false)
+        }
+        var pfd = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
+        if poll(&pfd, 1, Int32(timeout * 1000)) > 0 {
+            var buffer = [UInt8](repeating: 0, count: 2048)
+            let n = recv(fd, &buffer, buffer.count, 0)
+            if n > 0 {
+                return Result(label: label,
+                              outcome: "reply: \(preview(Data(buffer[0..<n])))",
+                              success: true)
+            }
+        }
+        return Result(label: label, outcome: "sent, nothing back", success: false)
     }
 
     /// The phone's Wi-Fi (en0) IPv4 — proves association with the bridge's
