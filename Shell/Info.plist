@@ -22,6 +22,8 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Reads live battery telemetry from the S3XY Commander / CANdy CAN reader over Bluetooth.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Connects to the S3XY Commander CAN bridge on the car's Wi-Fi (192.168.4.1) for live pack telemetry.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>

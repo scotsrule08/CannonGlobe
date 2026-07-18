@@ -19,6 +19,7 @@ struct SettingsView: View {
     @State private var bridgeStats = PandaClient.BridgeStats()
     @State private var probeResults: [BridgeProbe.Result] = []
     @State private var probing = false
+    @StateObject private var ble = BLEScanner()
 
     var body: some View {
         NavigationStack {
@@ -125,19 +126,38 @@ struct SettingsView: View {
                                 }
                             }
                         }
-                        #if os(iOS)
-                        if probeResults.contains(where: { $0.outcome.contains("Local Network") || $0.outcome.contains("Network is down") }) {
-                            Button {
-                                if let url = URL(string: UIApplication.openSettingsURLString) {
-                                    UIApplication.shared.open(url)
+                        Divider()
+                        Button {
+                            ble.start()
+                        } label: {
+                            if ble.scanning {
+                                HStack(spacing: 10) {
+                                    ProgressView().controlSize(.small)
+                                    Text("Scanning Bluetooth…")
                                 }
-                            } label: {
-                                Label("Open CannonGlobe settings to allow Local Network",
-                                      systemImage: "lock.open")
-                                    .font(.callout.weight(.semibold))
+                            } else {
+                                Label("Scan for Bluetooth devices", systemImage: "dot.radiowaves.left.and.right")
                             }
                         }
-                        #endif
+                        .disabled(ble.scanning)
+                        if !ble.stateText.isEmpty && ble.stateText != "Idle" {
+                            Text(ble.stateText).font(.caption).foregroundStyle(.secondary)
+                        }
+                        ForEach(ble.devices) { d in
+                            VStack(alignment: .leading, spacing: 1) {
+                                HStack {
+                                    Text(d.name).font(.caption.weight(.semibold))
+                                    Spacer()
+                                    Text("\(d.rssi) dBm").font(.caption2.monospaced())
+                                        .foregroundStyle(.secondary)
+                                }
+                                if !d.services.isEmpty {
+                                    Text("services: " + d.services.joined(separator: ", "))
+                                        .font(.caption2.monospaced())
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
                     }
                 } header: {
                     Text("CAN bridge")
