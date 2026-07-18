@@ -29,14 +29,18 @@ public struct CompareScreenView: View {
                       systemImage: "eye.slash")
                     .font(.headline)
                     .foregroundStyle(.secondary)
+            } else if model.plansAgree {
+                Label("Plans agree", systemImage: "checkmark.circle")
+                    .font(.title2.weight(.semibold))
+                    .foregroundStyle(.green)
             } else if let delta = model.headlineDelta {
                 Label(delta, systemImage: "bolt.badge.clock.fill")
                     .font(.title.weight(.black))
                     .foregroundStyle(.cyan)
             } else {
-                Label("Plans agree", systemImage: "checkmark.circle")
-                    .font(.title2.weight(.semibold))
-                    .foregroundStyle(.green)
+                Label("Different stops, same total time", systemImage: "arrow.triangle.branch")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.orange)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -81,6 +85,9 @@ public struct CompareScreenView: View {
     public var teslaRows: [StopRow] = []
     public var headlineDelta: String?
     public var teslaPlanAvailable = false
+    /// True only when both plans pick the SAME first stop — total time being
+    /// close is not agreement, it's a coin flip worth showing.
+    public var plansAgree = false
     public var siteNames: [String: String] = [:]
     public var siteAmenities: [String: String] = [:]
 
@@ -93,11 +100,19 @@ public struct CompareScreenView: View {
         teslaRows = teslaNav.map(rows(for:)) ?? []
         teslaPlanAvailable = teslaNav != nil
         if let tesla = teslaNav {
+            plansAgree = tesla.stops.first?.siteID == optimized.stops.first?.siteID
             let delta = tesla.totalRemainingSeconds - optimized.totalRemainingSeconds
-            headlineDelta = delta > 60
-                ? "App plan is \(Self.hms(delta)) faster"
-                : nil
+            if plansAgree {
+                headlineDelta = nil
+            } else if delta > 60 {
+                headlineDelta = "App plan is \(Self.hms(delta)) faster"
+            } else if delta < -60 {
+                headlineDelta = "Tesla Nav is \(Self.hms(-delta)) faster"
+            } else {
+                headlineDelta = nil   // different stops, same time — headline handles it
+            }
         } else {
+            plansAgree = false
             headlineDelta = nil
         }
     }
