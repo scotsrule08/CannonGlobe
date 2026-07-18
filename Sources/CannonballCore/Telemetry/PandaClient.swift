@@ -54,6 +54,41 @@ public actor PandaClient {
     private var stateContinuation: AsyncStream<PandaConnectionState>.Continuation?
     public private(set) var connectionStates: AsyncStream<PandaConnectionState>!
 
+    /// Field-probe telemetry: enough to verify framing + IDs from the phone
+    /// while sitting in the car on the Commander's Wi-Fi.
+    public struct AddressCount: Sendable, Identifiable {
+        public var address: UInt32
+        public var count: Int
+        public var id: UInt32 { address }
+    }
+    public struct BridgeStats: Sendable {
+        public var state: PandaConnectionState = .disconnected
+        public var datagrams = 0
+        public var frames = 0
+        public var decodedSignals = 0
+        public var topAddresses: [AddressCount] = []
+        public var lastFrameAt: Date?
+        public init() {}
+    }
+    private var datagramCount = 0
+    private var frameCount = 0
+    private var signalCount = 0
+    private var addressCounts: [UInt32: Int] = [:]
+
+    public func currentStats() -> BridgeStats {
+        var stats = BridgeStats()
+        stats.state = state
+        stats.datagrams = datagramCount
+        stats.frames = frameCount
+        stats.decodedSignals = signalCount
+        stats.lastFrameAt = lastFrameAt == .distantPast ? nil : lastFrameAt
+        stats.topAddresses = addressCounts
+            .sorted { $0.value > $1.value }
+            .prefix(6)
+            .map { AddressCount(address: $0.key, count: $0.value) }
+        return stats
+    }
+
     public init() {
         signals = AsyncStream { self.continuation = $0 }
         connectionStates = AsyncStream { self.stateContinuation = $0 }
@@ -61,6 +96,7 @@ public actor PandaClient {
 
     public func start(endpoint: NWEndpoint = PandaClient.defaultEndpoint) {
         guard connection == nil else { return }
+        datagramCount = 0; frameCount = 0; signalCount = 0; addressCounts = [:]
         setState(.probing)
         let params = NWParameters.udp
         params.requiredInterfaceType = .wifi   // never route via cellular
@@ -129,8 +165,12 @@ public actor PandaClient {
     private func ingest(datagram: Data) {
         lastFrameAt = .init()
         if state != .streaming { setState(.streaming) }
+        datagramCount += 1
         for frame in Self.parseRecords(datagram) {
+            frameCount += 1
+            addressCounts[frame.address, default: 0] += 1
             for signal in decoder.decode(frame) {
+                signalCount += 1
                 continuation?.yield(signal)
             }
         }

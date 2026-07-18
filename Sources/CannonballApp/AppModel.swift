@@ -1,6 +1,7 @@
 import Foundation
 import CoreLocation
 import MapKit
+import Network
 import CannonballCore
 
 public enum TripError: LocalizedError {
@@ -341,9 +342,38 @@ public final class AppModel {
         return (coords, route.expectedTravelTime)
     }
 
+    // MARK: CAN bridge (S3XY Commander) — setting-driven, RX-only
+
+    var canBridgeEnabled: Bool {
+        UserDefaults.standard.bool(forKey: "canBridgeEnabled")
+    }
+    var canBridgeHost: String {
+        UserDefaults.standard.string(forKey: "canBridgeHost") ?? "192.168.4.1"
+    }
+
+    public func setCANBridge(enabled: Bool, host: String) {
+        let cleanHost = host.trimmingCharacters(in: .whitespaces)
+        UserDefaults.standard.set(enabled, forKey: "canBridgeEnabled")
+        UserDefaults.standard.set(cleanHost, forKey: "canBridgeHost")
+        Task {
+            await panda.stop()
+            if enabled, !cleanHost.isEmpty {
+                await panda.start(endpoint: .hostPort(host: NWEndpoint.Host(cleanHost),
+                                                      port: 1338))
+            }
+        }
+    }
+
+    func canBridgeStats() async -> PandaClient.BridgeStats {
+        await panda.currentStats()
+    }
+
     private func wire(config: RunConfig) {
         Task {
-            await panda.start()
+            if canBridgeEnabled {
+                await panda.start(endpoint: .hostPort(host: NWEndpoint.Host(canBridgeHost),
+                                                      port: 1338))
+            }
             await tessie.startStreaming()
             await fusion.attach(panda: panda, tessie: tessie,
                                 gps: locationProvider.locations)

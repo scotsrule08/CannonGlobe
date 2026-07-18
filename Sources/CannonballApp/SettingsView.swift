@@ -11,6 +11,9 @@ struct SettingsView: View {
     @State private var status = TessieClient.ConnectionStatus()
     @State private var resetDone = false
     @AppStorage("raceModeEnabled") private var raceMode = true
+    @AppStorage("canBridgeEnabled") private var canBridge = false
+    @AppStorage("canBridgeHost") private var canHost = "192.168.4.1"
+    @State private var bridgeStats = PandaClient.BridgeStats()
 
     var body: some View {
         NavigationStack {
@@ -60,6 +63,40 @@ struct SettingsView: View {
                     }
                 }
                 Section {
+                    Toggle(isOn: $canBridge) {
+                        Label("S3XY Commander CAN bridge", systemImage: "antenna.radiowaves.left.and.right")
+                    }
+                    .onChange(of: canBridge) { _, on in
+                        model.setCANBridge(enabled: on, host: canHost)
+                    }
+                    if canBridge {
+                        TextField("Bridge IP", text: $canHost)
+                            .autocorrectionDisabled()
+                            .font(.body.monospaced())
+                            .onSubmit { model.setCANBridge(enabled: true, host: canHost) }
+                        HStack(spacing: 10) {
+                            Circle().fill(bridgeColor).frame(width: 10, height: 10)
+                            Text(bridgeText).font(.callout)
+                        }
+                        if bridgeStats.frames > 0 {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("\(bridgeStats.frames) frames · \(bridgeStats.decodedSignals) decoded")
+                                Text("Top IDs: " + bridgeStats.topAddresses
+                                    .map { String(format: "0x%03X×%d", $0.address, $0.count) }
+                                    .joined(separator: "  "))
+                            }
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
+                        }
+                    }
+                } header: {
+                    Text("CAN bridge")
+                } footer: {
+                    Text(canBridge
+                        ? "Join the Commander's Wi-Fi, then watch for frames above. Receive-only: nothing is ever transmitted onto the car's bus. Decoded IDs feed cell temps, pack power, and BMS limits at high rate."
+                        : "Live BMS data over the Commander's Wi-Fi hotspot. Enable when the Commander is installed.")
+                }
+                Section {
                     Button("Reset learned efficiency", role: .destructive) {
                         resetDone = false
                         Task {
@@ -79,9 +116,32 @@ struct SettingsView: View {
             .task {
                 while !Task.isCancelled {
                     status = await model.tessieStatus()
+                    if canBridge { bridgeStats = await model.canBridgeStats() }
                     try? await Task.sleep(for: .seconds(2))
                 }
             }
+        }
+    }
+
+    private var bridgeColor: Color {
+        switch bridgeStats.state {
+        case .streaming: .green
+        case .probing: .yellow
+        case .lost: .red
+        case .disconnected: .secondary.opacity(0.5)
+        }
+    }
+
+    private var bridgeText: String {
+        switch bridgeStats.state {
+        case .streaming:
+            if let last = bridgeStats.lastFrameAt {
+                return "Streaming · last frame \(Int(Date().timeIntervalSince(last)))s ago"
+            }
+            return "Streaming"
+        case .probing: return "Listening for the Commander at \(canHost)…"
+        case .lost: return "Signal lost, retrying"
+        case .disconnected: return "Off"
         }
     }
 
