@@ -119,6 +119,20 @@ public final class AppModel {
         CarSnapshot(cloud: await tessie.latestCloudState(), pack: pack)
     }
 
+    public struct BatterySnapshot: Sendable {
+        public var state: VehicleState?
+        public var cloud: CloudVehicleState?
+        public var pack: PackProfile
+        public var canStreaming: Bool
+    }
+
+    func batterySnapshot() async -> BatterySnapshot {
+        BatterySnapshot(state: latestState,
+                        cloud: await tessie.latestCloudState(),
+                        pack: pack,
+                        canStreaming: await panda.currentStats().state == .streaming)
+    }
+
     // MARK: chart data
 
     struct PlanProfile: Sendable {
