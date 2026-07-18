@@ -99,7 +99,11 @@ public actor PandaClient {
         datagramCount = 0; frameCount = 0; signalCount = 0; addressCounts = [:]
         setState(.probing)
         let params = NWParameters.udp
-        params.requiredInterfaceType = .wifi   // never route via cellular
+        // Prohibit cellular WITHOUT pinning .wifi: the .wifi requirement trips
+        // iOS's Local Network gate and yields ENETDOWN even when allowed
+        // (proven by the field probe — POSIX/unpinned reached the host, pinned
+        // did not).
+        params.prohibitedInterfaceTypes = [.cellular]
         let conn = NWConnection(to: endpoint, using: params)
         connection = conn
         conn.stateUpdateHandler = { [weak self] nwState in

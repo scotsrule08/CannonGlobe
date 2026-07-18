@@ -58,7 +58,53 @@ public enum BridgeProbe {
         results.append(await posix { posixUDP(host: host, port: 1338, timeout: 3) })
 
         results.append(await probeHTTP(host: host))
+
+        // Host is alive but the guessed ports are closed — sweep to find the
+        // open one. POSIX, since that path is unblocked.
+        results.append(await posix { posixPortSweep(host: host) })
         return results
+    }
+
+    /// Fast connect-scan of common OBD/CAN-bridge ports; reports which accept.
+    static func posixPortSweep(host: String) -> Result {
+        let ports: [UInt16] = [23, 80, 1000, 1338, 2000, 2323, 3000, 3333, 3500,
+                               4000, 5000, 5555, 6000, 6969, 7000, 7070, 8000,
+                               8080, 8081, 8888, 9000, 9999, 20000, 23000, 29536,
+                               35000, 35001]
+        var open: [UInt16] = []
+        for port in ports {
+            guard var addr = makeSockaddr(host: host, port: port) else { continue }
+            let fd = socket(AF_INET, SOCK_STREAM, 0)
+            guard fd >= 0 else { continue }
+            bindToWiFi(fd)
+            let flags = fcntl(fd, F_GETFL)
+            _ = fcntl(fd, F_SETFL, flags | O_NONBLOCK)
+            let rc = withUnsafePointer(to: &addr) { pointer in
+                pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                    connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+                }
+            }
+            if rc == 0 {
+                open.append(port)
+            } else if errno == EINPROGRESS {
+                var pfd = pollfd(fd: fd, events: Int16(POLLOUT), revents: 0)
+                if poll(&pfd, 1, 700) > 0 {
+                    var soError: Int32 = 0
+                    var len = socklen_t(MemoryLayout<Int32>.size)
+                    getsockopt(fd, SOL_SOCKET, SO_ERROR, &soError, &len)
+                    if soError == 0 { open.append(port) }
+                }
+            }
+            close(fd)
+        }
+        if open.isEmpty {
+            return Result(label: "Port sweep",
+                          outcome: "no open TCP ports found (BLE-only device?)",
+                          success: false)
+        }
+        return Result(label: "Port sweep",
+                      outcome: "OPEN: " + open.map(String.init).joined(separator: ", "),
+                      success: true)
     }
 
     private static func posix(_ body: @escaping @Sendable () -> Result) async -> Result {
