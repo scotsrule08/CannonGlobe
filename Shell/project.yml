@@ -12,6 +12,7 @@ targets:
     platform: iOS
     sources:
       - Sources
+      - Assets.xcassets
       - path: Secrets.plist
         buildPhase: resources
         optional: true
@@ -25,14 +26,19 @@ targets:
         CODE_SIGN_STYLE: Automatic
         TARGETED_DEVICE_FAMILY: "1"
         SWIFT_VERSION: "5.10"
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     info:
       path: Info.plist
       properties:
         UILaunchScreen: {}
         ITSAppUsesNonExemptEncryption: false
+        CFBundleDisplayName: CannonGlobe
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSLocationAlwaysAndWhenInUseUsageDescription: Continuous route position drives the charge planner and stop alerts for the whole run.
         NSLocationWhenInUseUsageDescription: Route position drives the charge planner and stop recommendations.
         NSLocalNetworkUsageDescription: Connects to the S3XY Commander CAN bridge on the car's Wi-Fi (192.168.4.1) for live pack telemetry.
         UIBackgroundModes:
           - location
-          - processing

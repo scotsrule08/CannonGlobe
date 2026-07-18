@@ -5,3 +5,4 @@ xcuserdata/
 *.xcuserstate
 Secrets.plist
 .DS_Store
+Shell/build/

@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		6CA6F74F6069D7EF3F3249C7 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C08A7687C72DFA15E13C480C /* Assets.xcassets */; };
 		A4D59E9CEAEF923213C3A073 /* CannonballApp in Frameworks */ = {isa = PBXBuildFile; productRef = C777B6EEFCDFF3E913A2BEFC /* CannonballApp */; };
 		A5F566933741C36E42451455 /* ShellApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE39C22E690714C676CC75DA /* ShellApp.swift */; };
 		FDFE4A2776DD65B651945943 /* Secrets.plist in Resources */ = {isa = PBXBuildFile; fileRef = CBB81CF34B78AD240A526D55 /* Secrets.plist */; };
@@ -15,6 +16,7 @@
 /* Begin PBXFileReference section */
 		53ABE487D38C360E62067F44 /* CannonGlobe */ = {isa = PBXFileReference; lastKnownFileType = folder; name = CannonGlobe; path = ..; sourceTree = SOURCE_ROOT; };
 		93410B6DE575ED576045EF7D /* CannonballShell.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = CannonballShell.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		C08A7687C72DFA15E13C480C /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		CBB81CF34B78AD240A526D55 /* Secrets.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Secrets.plist; sourceTree = "<group>"; };
 		CE39C22E690714C676CC75DA /* ShellApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellApp.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -50,6 +52,7 @@
 		A53A53BB57A9CFCC2C2AD5E9 = {
 			isa = PBXGroup;
 			children = (
+				C08A7687C72DFA15E13C480C /* Assets.xcassets */,
 				CBB81CF34B78AD240A526D55 /* Secrets.plist */,
 				FDCB31F589E2BCEEAAF8E41E /* Packages */,
 				3B9896F5152DBB4EADFCEB48 /* Sources */,
@@ -130,6 +133,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				6CA6F74F6069D7EF3F3249C7 /* Assets.xcassets in Resources */,
 				FDFE4A2776DD65B651945943 /* Secrets.plist in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -217,12 +221,14 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 557K654PY5;
 				INFOPLIST_FILE = Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
+				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.spencer.cannonball;
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.10;
@@ -292,12 +298,14 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 557K654PY5;
 				INFOPLIST_FILE = Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
+				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.spencer.cannonball;
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.10;
