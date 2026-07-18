@@ -92,8 +92,7 @@ public actor PandaClient {
     /// CAN IDs to subscribe to — the Commander forwards ONLY these. Covers
     /// every ID the decoder understands (pack V/A, SOC, energy, cell temps,
     /// BMS limits). Extend alongside CANDecoder.
-    public static let subscribeIDs: [UInt32] = [0x132, 0x33A, 0x352, 0x312, 0x2D2,
-                                                0x257, 0x293, 0x3D2, 0x321]
+    public static let subscribeIDs: [UInt32] = [0x132, 0x292, 0x352, 0x312, 0x252]
 
     public init() {
         signals = AsyncStream { self.continuation = $0 }
@@ -235,33 +234,54 @@ public actor PandaClient {
     }
 }
 
-/// Table-driven Model 3 DBC decode. Message IDs/scales live here as data so
-/// Phase-0 probe corrections are one-line edits (see docs §4.1 signal table).
+/// Model 3 CAN decode, signal layouts taken from the community DBC
+/// (joshwardell/model3dbc). Intel/little-endian bit fields extracted via
+/// `signalLE`; scales/offsets match the DBC exactly.
 struct CANDecoder: Sendable {
+    /// Extract a little-endian (Intel @1) signal: `length` bits at `start`,
+    /// optionally two's-complement signed.
+    static func signalLE(_ data: Data, start: Int, length: Int, signed: Bool = false) -> Int64 {
+        var raw: UInt64 = 0
+        for i in 0..<8 where data.startIndex + i < data.endIndex {
+            raw |= UInt64(data[data.startIndex + i]) << (8 * i)
+        }
+        let mask: UInt64 = length >= 64 ? ~0 : ((UInt64(1) << length) - 1)
+        let value = (raw >> UInt64(start)) & mask
+        if signed, length < 64, value & (UInt64(1) << UInt64(length - 1)) != 0 {
+            return Int64(bitPattern: value | ~mask)
+        }
+        return Int64(bitPattern: value)
+    }
+
     func decode(_ f: CANFrame) -> [CANSignal] {
+        let d = f.data
+        func sig(_ start: Int, _ len: Int, signed: Bool = false) -> Double {
+            Double(Self.signalLE(d, start: start, length: len, signed: signed))
+        }
         switch f.address {
-        case 0x132: // HVBattAmpVolt: volts u16*0.01 @0, amps s16*0.1 @16 (offset −800 A convention varies — probe-verified)
-            guard f.data.count >= 4 else { return [] }
-            let volts = Double(f.data.readLEUInt16(at: 0)) * 0.01
-            let rawAmps = Double(Int16(bitPattern: f.data.readLEUInt16(at: 2)))
-            return [.packVoltAmp(volts: volts, amps: rawAmps * 0.1)]
-        case 0x33A: // UI_SOC
-            guard f.data.count >= 2 else { return [] }
-            return [.soc(uiPercent: Double(f.data[f.data.startIndex]) * 0.5,
-                         minPercent: 0, maxPercent: 0)]
-        case 0x352: // BMS_energyStatus: remaining/full kWh *0.1
-            guard f.data.count >= 4 else { return [] }
-            return [.energyStatus(remainingKWh: Double(f.data.readLEUInt16(at: 0)) * 0.1,
-                                  fullKWh: Double(f.data.readLEUInt16(at: 2)) * 0.1)]
-        case 0x312: // BMS thermal: min/max cell temp, 0.25 °C/bit, −25 °C offset
-            guard f.data.count >= 2 else { return [] }
-            let minC = Double(f.data[f.data.startIndex]) * 0.25 - 25
-            let maxC = Double(f.data[f.data.startIndex + 1]) * 0.25 - 25
-            return [.cellTemps(minC: minC, maxC: maxC)]
-        case 0x2D2: // BMS power limits: max charge/discharge, 0.1 kW/bit
-            guard f.data.count >= 4 else { return [] }
-            return [.bmsPowerLimits(maxChargeKW: Double(f.data.readLEUInt16(at: 0)) * 0.1,
-                                    maxDischargeKW: Double(f.data.readLEUInt16(at: 2)) * 0.1)]
+        case 0x132: // 306 HVBattAmpVolt
+            guard d.count >= 4 else { return [] }
+            let volts = sig(0, 16) * 0.01                       // BattVoltage132
+            let amps = sig(16, 16, signed: true) * -0.1         // SmoothBattCurrent132
+            return [.packVoltAmp(volts: volts, amps: amps)]
+        case 0x292: // 658 BMS_SOC — SOCUI/min/max, 10-bit, 0.1%
+            guard d.count >= 5 else { return [] }
+            return [.soc(uiPercent: sig(10, 10) * 0.1,
+                         minPercent: sig(0, 10) * 0.1,
+                         maxPercent: sig(20, 10) * 0.1)]
+        case 0x352: // 850 BMS_energyStatus — nominal full/remaining, 11-bit, 0.1 kWh
+            guard d.count >= 8 else { return [] }
+            return [.energyStatus(remainingKWh: sig(11, 11) * 0.1,
+                                  fullKWh: sig(0, 11) * 0.1)]
+        case 0x312: // 786 BMSthermal — min/max pack temp, 9-bit, 0.25 °C, −25 offset
+            guard d.count >= 8 else { return [] }
+            return [.cellTemps(minC: sig(44, 9) * 0.25 - 25,
+                               maxC: sig(53, 9) * 0.25 - 25)]
+        case 0x252: // 594 BMS_powerAvailable
+            guard d.count >= 4 else { return [] }
+            let regen = sig(0, 16) * 0.01                       // maxRegenPower
+            let discharge = sig(16, 16) * 0.013                 // maxDischargePower
+            return [.bmsPowerLimits(maxChargeKW: regen, maxDischargeKW: discharge)]
         default:
             return []
         }

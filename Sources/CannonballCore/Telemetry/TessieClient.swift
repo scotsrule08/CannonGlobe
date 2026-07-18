@@ -38,6 +38,7 @@ public struct CloudVehicleState: Sendable, Codable {
     public var modelName: String?
     /// True only on a DC fast charger — "Charging" alone can be home AC.
     public var fastChargerPresent: Bool?
+    public var isPreconditioning: Bool?
 }
 
 public struct NearbyChargingSite: Sendable, Codable {
@@ -397,6 +398,7 @@ struct TessieStateDTO: Decodable {
     }
     struct ClimateState: Decodable {
         var insideTemp: Double?; var outsideTemp: Double?
+        var isPreconditioning: Bool?
     }
     struct VehicleConfig: Decodable {
         var carType: String?; var trimBadging: String?; var model: String?
@@ -442,7 +444,8 @@ struct TessieStateDTO: Decodable {
             packCurrentA: chargeState.packCurrent,
             energyRemainingKWh: chargeState.energyRemaining,
             modelName: vehicleConfig?.model,
-            fastChargerPresent: chargeState.fastChargerPresent)
+            fastChargerPresent: chargeState.fastChargerPresent,
+            isPreconditioning: climateState.isPreconditioning)
     }
 }
 

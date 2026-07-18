@@ -34,43 +34,72 @@ final class PandaClientTests: XCTestCase {
         XCTAssertEqual(Array(frames[1].data), [180, 220])
     }
 
+    /// Pack an unsigned value of `length` bits at little-endian bit `start`
+    /// into an 8-byte payload — the inverse of CANDecoder.signalLE.
+    func pack(_ fields: [(start: Int, length: Int, value: UInt64)]) -> [UInt8] {
+        var raw: UInt64 = 0
+        for f in fields {
+            let mask = (UInt64(1) << f.length) - 1
+            raw |= (f.value & mask) << f.start
+        }
+        return (0..<8).map { UInt8((raw >> (8 * $0)) & 0xFF) }
+    }
+
     func testDecodePackVoltAmp() throws {
-        // 390.86 V → raw 39086 (0x98AE LE), −12.3 A → raw −123 as Int16.
-        let volts = UInt16(39086)
-        let amps = UInt16(bitPattern: Int16(-123))
-        let frame = PandaClient.parseRecords(record(address: 0x132, payload: [
-            UInt8(volts & 0xFF), UInt8(volts >> 8),
-            UInt8(amps & 0xFF), UInt8(amps >> 8),
-        ]))[0]
-        let signals = CANDecoder().decode(frame)
-        guard case let .packVoltAmp(v, a) = try XCTUnwrap(signals.first) else {
+        // BattVoltage132 @0 ×0.01 → 336.3 V (raw 33630). SmoothBattCurrent132
+        // @16 signed ×-0.1: -19.7 A ⇒ raw +197.
+        let payload = pack([(0, 16, 33630), (16, 16, 197)])
+        let frame = PandaClient.parseRecords(record(address: 0x132, payload: payload))[0]
+        guard case let .packVoltAmp(v, a) = try XCTUnwrap(CANDecoder().decode(frame).first) else {
             return XCTFail("expected packVoltAmp")
         }
-        XCTAssertEqual(v, 390.86, accuracy: 0.01)
-        XCTAssertEqual(a, -12.3, accuracy: 0.01)
+        XCTAssertEqual(v, 336.3, accuracy: 0.05)
+        XCTAssertEqual(a, -19.7, accuracy: 0.05)
     }
 
     func testDecodeCellTemps() throws {
-        // 0.25 °C/bit, −25 °C offset: 20 °C → 180, 30 °C → 220.
-        let frame = PandaClient.parseRecords(record(address: 0x312, payload: [180, 220]))[0]
+        // 786: min @44 (9-bit), max @53 (9-bit), ×0.25 −25. 32 °C ⇒ 228, 38 °C ⇒ 252.
+        let payload = pack([(44, 9, 228), (53, 9, 252)])
+        let frame = PandaClient.parseRecords(record(address: 0x312, payload: payload))[0]
         guard case let .cellTemps(minC, maxC) = try XCTUnwrap(CANDecoder().decode(frame).first) else {
             return XCTFail("expected cellTemps")
         }
-        XCTAssertEqual(minC, 20, accuracy: 0.01)
-        XCTAssertEqual(maxC, 30, accuracy: 0.01)
+        XCTAssertEqual(minC, 32, accuracy: 0.01)
+        XCTAssertEqual(maxC, 38, accuracy: 0.01)
     }
 
     func testDecodeEnergyStatus() throws {
-        // 53.0 kWh remaining → 530, 75.0 full → 750, 0.1 kWh/bit.
-        let frame = PandaClient.parseRecords(record(address: 0x352, payload: [
-            0x12, 0x02,   // 530
-            0xEE, 0x02,   // 750
-        ]))[0]
+        // 850: full @0 (11-bit) ×0.1 → 75.0 (raw 750); remaining @11 (11-bit) → 42.0 (raw 420).
+        let payload = pack([(0, 11, 750), (11, 11, 420)])
+        let frame = PandaClient.parseRecords(record(address: 0x352, payload: payload))[0]
         guard case let .energyStatus(remaining, full) = try XCTUnwrap(CANDecoder().decode(frame).first) else {
             return XCTFail("expected energyStatus")
         }
-        XCTAssertEqual(remaining, 53.0, accuracy: 0.01)
-        XCTAssertEqual(full, 75.0, accuracy: 0.01)
+        XCTAssertEqual(remaining, 42.0, accuracy: 0.05)
+        XCTAssertEqual(full, 75.0, accuracy: 0.05)
+    }
+
+    func testDecodeSOC() throws {
+        // 292: SOCUI @10 (10-bit) ×0.1 → 67.0% (raw 670).
+        let payload = pack([(0, 10, 632), (10, 10, 670), (20, 10, 676)])
+        let frame = PandaClient.parseRecords(record(address: 0x292, payload: payload))[0]
+        guard case let .soc(ui, mn, mx) = try XCTUnwrap(CANDecoder().decode(frame).first) else {
+            return XCTFail("expected soc")
+        }
+        XCTAssertEqual(ui, 67.0, accuracy: 0.05)
+        XCTAssertEqual(mn, 63.2, accuracy: 0.05)
+        XCTAssertEqual(mx, 67.6, accuracy: 0.05)
+    }
+
+    func testDecodeBMSPower() throws {
+        // 594: regen @0 ×0.01 → 60 kW (raw 6000); discharge @16 ×0.013 → 130 kW (raw 10000).
+        let payload = pack([(0, 16, 6000), (16, 16, 10000)])
+        let frame = PandaClient.parseRecords(record(address: 0x252, payload: payload))[0]
+        guard case let .bmsPowerLimits(charge, discharge) = try XCTUnwrap(CANDecoder().decode(frame).first) else {
+            return XCTFail("expected bmsPowerLimits")
+        }
+        XCTAssertEqual(charge, 60, accuracy: 0.1)
+        XCTAssertEqual(discharge, 130, accuracy: 0.5)
     }
 
     func testSubscribePacketFormat() {

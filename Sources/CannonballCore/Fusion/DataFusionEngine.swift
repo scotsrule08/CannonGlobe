@@ -106,6 +106,9 @@ public actor DataFusionEngine {
         let charging = (s.chargingState == "Charging" || s.chargingState == "Supercharging")
             && (s.fastChargerPresent ?? true)
         fill(\.isDCFastCharging, charging, canStale: Freshness.canSlow)
+        if let precon = s.isPreconditioning {
+            fill(\.precondition, precon ? .heating : .off, canStale: Freshness.canSlow)
+        }
         if current.coordinate.source != .phoneGPS || current.coordinate.age(now: now) > Freshness.gps {
             current.coordinate = .init(.init(latitude: s.latitude, longitude: s.longitude),
                                        source: .tessieStream, timestamp: now)

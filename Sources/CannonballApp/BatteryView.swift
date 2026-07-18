@@ -92,7 +92,7 @@ struct BatteryView: View {
             let kW = s.packPowerKW
             LabeledContent("Pack power",
                            value: String(format: "%.1f kW %@", abs(kW), kW < 0 ? "(charging)" : ""))
-            row("BMS max charge", String(format: "%.0f kW", s.bmsMaxChargeKW.value),
+            row("BMS max regen", String(format: "%.0f kW", s.bmsMaxChargeKW.value),
                 s.bmsMaxChargeKW.source)
             row("BMS max discharge", String(format: "%.0f kW", s.bmsMaxDischargeKW.value),
                 s.bmsMaxDischargeKW.source)
