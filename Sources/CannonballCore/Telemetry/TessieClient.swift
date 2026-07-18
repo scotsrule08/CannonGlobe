@@ -34,6 +34,8 @@ public struct CloudVehicleState: Sendable, Codable {
     public var energyRemainingKWh: Double?
     /// Human model name from vehicle_config ("Model Y").
     public var modelName: String?
+    /// True only on a DC fast charger — "Charging" alone can be home AC.
+    public var fastChargerPresent: Bool?
 }
 
 public struct NearbyChargingSite: Sendable, Codable {
@@ -433,7 +435,8 @@ struct TessieStateDTO: Decodable {
             packVoltage: chargeState.packVoltage,
             packCurrentA: chargeState.packCurrent,
             energyRemainingKWh: chargeState.energyRemaining,
-            modelName: vehicleConfig?.model)
+            modelName: vehicleConfig?.model,
+            fastChargerPresent: chargeState.fastChargerPresent)
     }
 }
 

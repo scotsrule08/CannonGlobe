@@ -422,15 +422,37 @@ public final class AppModel {
             .flatMap { try? JSONDecoder().decode(RunLog.self, from: $0) }
     }
 
+    /// Live (SOC, kW) trace of the current DC session — feeds the Charge
+    /// tab's session-vs-baseline overlay. Kept after unplug for review;
+    /// cleared when the next session starts.
+    struct SessionSample: Identifiable, Sendable {
+        var id: Int; var soc: Double; var kW: Double
+    }
+    private(set) var liveSessionSamples: [SessionSample] = []
+
     private func recordRunLog(_ state: VehicleState) {
         let charging = state.isDCFastCharging.value
         defer { wasDCCharging = charging }
+        if charging && !wasDCCharging { liveSessionSamples = [] }
+        if charging { recordSessionSample(state) }
         guard runLog != nil else { return }
         if charging && !wasDCCharging {
             openStopRecord(state)
         } else if !charging && wasDCCharging {
             closeStopRecord(state)
         }
+    }
+
+    private func recordSessionSample(_ state: VehicleState) {
+        let soc = state.socPercent.value
+        let kW = state.chargePowerKW.value
+        guard kW > 2 else { return }
+        if let last = liveSessionSamples.last {
+            guard soc >= last.soc, soc - last.soc > 0.15 || abs(kW - last.kW) > 4
+            else { return }
+        }
+        liveSessionSamples.append(SessionSample(id: liveSessionSamples.count,
+                                                soc: soc, kW: kW))
     }
 
     private func openStopRecord(_ state: VehicleState) {

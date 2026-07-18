@@ -22,6 +22,7 @@ struct ChargeInsightsView: View {
     let model: AppModel
     @State private var snapshot: AppModel.CarSnapshot?
     @State private var plan: AppModel.PlanProfile?
+    @State private var session: [AppModel.SessionSample] = []
 
     private var pack: PackProfile { snapshot?.pack ?? .us2025PremiumRWD }
     private var currentSOC: Double? { snapshot?.cloud?.socPercent }
@@ -40,6 +41,7 @@ struct ChargeInsightsView: View {
             while !Task.isCancelled {
                 snapshot = await model.carSnapshot()
                 plan = model.planProfile()
+                session = model.liveSessionSamples
                 try? await Task.sleep(for: .seconds(5))
             }
         }
@@ -68,18 +70,33 @@ struct ChargeInsightsView: View {
         let taperStart = points.first { $0.soc > idealHi && $0.kW < peak * 0.4 }?.soc ?? 60
 
         return VStack(alignment: .leading, spacing: 8) {
-            header("CHARGE CURVE", "Warm pack on an unshared V3+ stall")
+            header("CHARGE CURVE",
+                   session.isEmpty ? "Warm pack on an unshared V3+ stall"
+                                   : "Live session (orange) vs the reference curve")
             Chart {
                 RectangleMark(xStart: .value("SOC", idealLo), xEnd: .value("SOC", idealHi))
                     .foregroundStyle(.green.opacity(0.13))
                 RectangleMark(xStart: .value("SOC", taperStart), xEnd: .value("SOC", 100))
                     .foregroundStyle(.red.opacity(0.07))
                 ForEach(points) { p in
-                    LineMark(x: .value("SOC %", p.soc), y: .value("kW", p.kW))
+                    LineMark(x: .value("SOC %", p.soc), y: .value("kW", p.kW),
+                             series: .value("Curve", "reference"))
                         .foregroundStyle(.green)
                         .interpolationMethod(.monotone)
                 }
-                if let soc = currentSOC {
+                ForEach(session) { s in
+                    LineMark(x: .value("SOC %", s.soc), y: .value("kW", s.kW),
+                             series: .value("Curve", "session"))
+                        .foregroundStyle(.orange)
+                        .lineStyle(StrokeStyle(lineWidth: 2.5))
+                        .interpolationMethod(.monotone)
+                }
+                if let last = session.last {
+                    PointMark(x: .value("SOC %", last.soc), y: .value("kW", last.kW))
+                        .foregroundStyle(.orange)
+                        .symbolSize(70)
+                }
+                if session.isEmpty, let soc = currentSOC {
                     RuleMark(x: .value("Now", soc))
                         .foregroundStyle(.orange)
                         .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
@@ -91,8 +108,20 @@ struct ChargeInsightsView: View {
             .chartYAxisLabel("kW")
             .chartXAxisLabel("State of charge %")
             .frame(height: 190)
-            caption("Ideal plug-in band: \(Int(idealLo))–\(Int(idealHi))% (≥\(Int(peak * 0.8)) kW). Past \(Int(taperStart))% the taper makes minutes at the stall cost more than they buy.")
+            caption(sessionCaption(points: points)
+                ?? "Ideal plug-in band: \(Int(idealLo))–\(Int(idealHi))% (≥\(Int(peak * 0.8)) kW). Past \(Int(taperStart))% the taper makes minutes at the stall cost more than they buy.")
         }
+    }
+
+    /// "212 kW at 18%: 93% of the reference" while a session trace exists.
+    private func sessionCaption(points: [CurvePoint]) -> String? {
+        guard let last = session.last else { return nil }
+        let index = max(0, min(points.count - 1, Int(last.soc.rounded())))
+        let reference = points[index].kW
+        guard reference > 1 else { return nil }
+        let ratio = Int((last.kW / reference * 100).rounded())
+        let health = ratio >= 90 ? "on pace" : (ratio >= 70 ? "below the curve" : "well below the curve, check the watchdog")
+        return "Live: \(Int(last.kW)) kW at \(Int(last.soc))%, \(ratio)% of the reference (\(health)). Session trace resets at the next plug-in."
     }
 
     // MARK: temperature acceptance + ideal precondition window

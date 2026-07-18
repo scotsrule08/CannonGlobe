@@ -101,7 +101,10 @@ public actor DataFusionEngine {
         fill(\.packCurrentA, s.packCurrentA, canStale: Freshness.canFast)
         fill(\.usableKWhRemaining, s.energyRemainingKWh, canStale: Freshness.canSlow)
         fill(\.cabinTempC, s.insideTempC, canStale: Freshness.canSlow)
-        let charging = s.chargingState == "Charging" || s.chargingState == "Supercharging"
+        // "Charging" alone can be a garage L2 — require the DC flag when the
+        // API provides it so fast-charge logic never fires at home.
+        let charging = (s.chargingState == "Charging" || s.chargingState == "Supercharging")
+            && (s.fastChargerPresent ?? true)
         fill(\.isDCFastCharging, charging, canStale: Freshness.canSlow)
         if current.coordinate.source != .phoneGPS || current.coordinate.age(now: now) > Freshness.gps {
             current.coordinate = .init(.init(latitude: s.latitude, longitude: s.longitude),
