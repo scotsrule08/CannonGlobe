@@ -201,9 +201,15 @@ struct SettingsView: View {
                 } header: {
                     Text("CAN bridge")
                 } footer: {
-                    Text(canBridge
-                        ? "Join the Commander's Wi-Fi, then run the probe to identify its protocol. Receive-only on the car's bus. If every row says 'no response', check Settings > Privacy & Security > Local Network and make sure CannonGlobe is allowed."
-                        : "Live BMS data over the Commander's Wi-Fi hotspot. Enable when the Commander is installed.")
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("To stream live BMS data:")
+                        Text("1. In the S3XY Gadgets app → Commander settings, turn on \"Enable ScanMyTesla support.\"")
+                        Text("2. Join the S3XY_OBD Wi-Fi (password 12345678); turn off any VPN.")
+                        Text("3. Toggle this on. Frames start on UDP 1338 (Panda) once support is enabled.")
+                        Text("The stream is off by default, so a probe with no open ports means step 1 isn't done yet. Receive-only on the car's bus.")
+                            .foregroundStyle(.secondary)
+                    }
+                    .font(.caption)
                 }
                 Section {
                     Button("Reset learned efficiency", role: .destructive) {
