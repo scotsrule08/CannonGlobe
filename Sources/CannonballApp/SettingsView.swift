@@ -14,6 +14,8 @@ struct SettingsView: View {
     @AppStorage("canBridgeEnabled") private var canBridge = false
     @AppStorage("canBridgeHost") private var canHost = "192.168.4.1"
     @State private var bridgeStats = PandaClient.BridgeStats()
+    @State private var probeResults: [BridgeProbe.Result] = []
+    @State private var probing = false
 
     var body: some View {
         NavigationStack {
@@ -88,12 +90,44 @@ struct SettingsView: View {
                             .font(.caption.monospaced())
                             .foregroundStyle(.secondary)
                         }
+                        Button {
+                            probing = true
+                            probeResults = []
+                            Task {
+                                probeResults = await BridgeProbe.run(host: canHost)
+                                probing = false
+                            }
+                        } label: {
+                            if probing {
+                                HStack(spacing: 10) {
+                                    ProgressView().controlSize(.small)
+                                    Text("Probing \(canHost)…")
+                                }
+                            } else {
+                                Label("Run bridge probe", systemImage: "stethoscope")
+                            }
+                        }
+                        .disabled(probing)
+                        ForEach(probeResults) { result in
+                            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                Image(systemName: result.success
+                                    ? "checkmark.circle.fill" : "xmark.circle")
+                                    .foregroundStyle(result.success ? .green : .secondary)
+                                    .font(.caption)
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(result.label).font(.caption.weight(.semibold))
+                                    Text(result.outcome)
+                                        .font(.caption2.monospaced())
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
                     }
                 } header: {
                     Text("CAN bridge")
                 } footer: {
                     Text(canBridge
-                        ? "Join the Commander's Wi-Fi, then watch for frames above. Receive-only: nothing is ever transmitted onto the car's bus. Decoded IDs feed cell temps, pack power, and BMS limits at high rate."
+                        ? "Join the Commander's Wi-Fi, then run the probe to identify its protocol. Receive-only on the car's bus. If every row says 'no response', check Settings > Privacy & Security > Local Network and make sure CannonGlobe is allowed."
                         : "Live BMS data over the Commander's Wi-Fi hotspot. Enable when the Commander is installed.")
                 }
                 Section {
