@@ -59,7 +59,8 @@ public struct DashboardView: View {
     @ViewBuilder private var actionBanner: some View {
         if let rec = model.activeRecommendation {
             Label(rec.message, systemImage: rec.isCritical ? "exclamationmark.octagon.fill" : "bolt.fill")
-                .font(.title2.weight(.bold))
+                .font(.title3.weight(.semibold))
+                .fixedSize(horizontal: false, vertical: true)
                 .padding()
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(rec.isCritical ? .red.opacity(0.25) : .blue.opacity(0.2),

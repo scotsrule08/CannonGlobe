@@ -364,6 +364,7 @@ public final class AppModel {
                 self.maybeReplan(state)
                 self.maybeCoach(state)
                 self.recordRunLog(state)
+                self.updateLiveEfficiency(state)
             }
         }
         // Hourly weather refresh; occupancy refresh at 90 s (docs §4.3/§4.5).
@@ -582,6 +583,13 @@ public final class AppModel {
             self.compare.update(optimized: solution.plan, teslaNav: pinned?.plan,
                                 siteNames: Dictionary(uniqueKeysWithValues: self.sites.map { ($0.id, $0.name) }))
             self.dashboard.update(plan: solution.plan, siteNames: self.compare.siteNames)
+            if let pinned {
+                let deltaMin = Int(((pinned.plan.totalRemainingSeconds
+                    - solution.plan.totalRemainingSeconds) / 60).rounded())
+                self.dashboard.deltaVsTeslaText = deltaMin >= 0 ? "+\(deltaMin)" : "\(deltaMin)"
+            } else {
+                self.dashboard.deltaVsTeslaText = "—"
+            }
             // Pace vs the first plan of the run.
             if let log = self.runLog, let baseline = log.baselineTotalSeconds {
                 let projected = Date().timeIntervalSince(log.startedAt)
@@ -691,6 +699,37 @@ public final class AppModel {
            stop.departureSOC > limit + 1 {
             await engine.submit(kind: .chargeLimit, message:
                 "Raise the car's charge limit: it's set to \(Int(limit))% but the plan departs \(siteName) at \(Int(stop.departureSOC))%.")
+        }
+    }
+
+    // MARK: live Wh/mi — rolling window over odometer + pack energy deltas
+
+    private var efficiencySamples: [(odo: Double, kWh: Double)] = []
+
+    private func updateLiveEfficiency(_ state: VehicleState) {
+        guard !state.isDCFastCharging.value else {
+            efficiencySamples.removeAll()          // a charge invalidates the window
+            return
+        }
+        guard state.odometerMi.source != .deadReckoned,
+              state.usableKWhRemaining.source != .deadReckoned else { return }
+        let odo = state.odometerMi.value
+        let kWh = state.usableKWhRemaining.value
+        if let last = efficiencySamples.last {
+            guard odo > last.odo + 0.3 else { return }
+        }
+        efficiencySamples.append((odo, kWh))
+        while let first = efficiencySamples.first, odo - first.odo > 25 {
+            efficiencySamples.removeFirst()
+        }
+        guard let first = efficiencySamples.first, odo - first.odo >= 8 else { return }
+        let usedKWh = first.kWh - kWh
+        guard usedKWh > 0.2 else { return }
+        let whPerMi = usedKWh * 1000 / (odo - first.odo)
+        dashboard.whPerMiText = "\(Int(whPerMi.rounded()))"
+        if let leg = latestSolution?.plan.legs.first, leg.distanceMi > 1 {
+            let planWhPerMi = learner.model.predict(leg: leg).kWh * 1000 / leg.distanceMi
+            dashboard.efficiencyOnPlan = whPerMi <= planWhPerMi * 1.05
         }
     }
 
