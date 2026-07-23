@@ -42,6 +42,12 @@ public struct RouteCorridor: Sendable {
         weatherAnchors = anchors.sorted { $0.mile < $1.mile }
     }
 
+    /// (routeMile, meters) terrain anchors — dense once ElevationClient has
+    /// run, site-derived before that.
+    public var elevationProfile: [(mile: Double, meters: Double)] {
+        elevationAnchors.map { (mile: $0.0, meters: $0.1) }
+    }
+
     /// Swap in a dense terrain profile (mile, elevationM), replacing the
     /// site-interpolated anchors.
     public mutating func applyElevation(_ anchors: [(Double, Double)]) {

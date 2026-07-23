@@ -146,8 +146,16 @@ public final class AppModel {
             var tempF: Double
             var precipMmPerHour: Double
         }
+        struct Elevation: Identifiable, Sendable {
+            var id: Int
+            var milesFromHere: Double
+            var feet: Double
+        }
         var points: [Point] = []
         var stops: [StopWeather] = []
+        var elevation: [Elevation] = []
+        /// Cumulative climb still ahead, in feet.
+        var climbAheadFt: Double = 0
         var destinationName: String?
         var hasData = false
     }
@@ -156,11 +164,23 @@ public final class AppModel {
         var snap = WeatherSnapshot()
         guard let trip = activeTrip else { return snap }
         snap.destinationName = trip.destinationName
+        let currentMile = latestState.map { trip.mile(of: $0.coordinate.value) } ?? 0
+
+        // Terrain profile ahead (independent of the weather fetch).
+        let terrain = trip.elevationProfile.filter { $0.mile >= currentMile - 5 }
+        snap.elevation = terrain.enumerated().map { index, point in
+            WeatherSnapshot.Elevation(id: index,
+                                      milesFromHere: point.mile - currentMile,
+                                      feet: point.meters * 3.28084)
+        }
+        snap.climbAheadFt = zip(terrain, terrain.dropFirst())
+            .reduce(0) { $0 + max(0, ($1.1.meters - $1.0.meters) * 3.28084) }
+
+        // Terrain alone is enough to show the tab; weather fills in after.
+        snap.hasData = !snap.elevation.isEmpty
         let anchors = trip.weatherAnchors
         guard !anchors.isEmpty else { return snap }
         snap.hasData = true
-
-        let currentMile = latestState.map { trip.mile(of: $0.coordinate.value) } ?? 0
         let mph = max(30, trip.avgSpeedMps * 2.237)
 
         snap.points = anchors.enumerated().compactMap { index, a in

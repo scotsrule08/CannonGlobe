@@ -16,11 +16,12 @@ struct WeatherView: View {
                 if snap.hasData {
                     List {
                         headlineSection
-                        windSection
-                        tempSection
-                        if snap.points.contains(where: { $0.precipMmPerHour > 0.05 }) {
+                        if !snap.points.isEmpty {
+                            windSection
+                            tempSection
                             precipSection
                         }
+                        if !snap.elevation.isEmpty { elevationSection }
                         if !snap.stops.isEmpty { stopsSection }
                     }
                 } else {
@@ -118,8 +119,25 @@ struct WeatherView: View {
         }
     }
 
+    @ViewBuilder
     private var precipSection: some View {
+        let wet = snap.points.filter { $0.precipMmPerHour > 0.05 }
         Section {
+            if wet.isEmpty {
+                Label("Dry the whole way", systemImage: "sun.max")
+                    .foregroundStyle(.green)
+            } else {
+                if let first = wet.first {
+                    Label("Starts in \(Int(first.milesFromHere)) mi · \(precipWord(first.precipMmPerHour))",
+                          systemImage: "cloud.rain")
+                        .font(.callout).foregroundStyle(.cyan)
+                }
+                if let peak = wet.max(by: { $0.precipMmPerHour < $1.precipMmPerHour }) {
+                    Text(String(format: "Heaviest %.1f mm/h at %d mi · about %d mi of wet road",
+                                peak.precipMmPerHour, Int(peak.milesFromHere), wet.count * 40))
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
             Chart(snap.points) { p in
                 BarMark(x: .value("Miles", p.milesFromHere),
                         y: .value("mm/h", p.precipMmPerHour))
@@ -131,7 +149,39 @@ struct WeatherView: View {
         } header: {
             Text("Precipitation")
         } footer: {
-            Text("Rain raises consumption and slows the plan (~3% per mm/h, capped at 15%).")
+            Text("Rain raises consumption and slows the plan (~3% per mm/h, capped at 15%). Both are already priced into the route.")
+        }
+    }
+
+    private var elevationSection: some View {
+        Section {
+            Label(String(format: "%.0f ft of climbing ahead", snap.climbAheadFt),
+                  systemImage: "mountain.2")
+                .font(.callout)
+                .foregroundStyle(snap.climbAheadFt > 3000 ? .orange : .secondary)
+            Chart {
+                ForEach(snap.elevation) { e in
+                    AreaMark(x: .value("Miles", e.milesFromHere),
+                             y: .value("ft", e.feet))
+                        .foregroundStyle(.brown.opacity(0.35))
+                    LineMark(x: .value("Miles", e.milesFromHere),
+                             y: .value("ft", e.feet))
+                        .foregroundStyle(.brown)
+                        .interpolationMethod(.monotone)
+                }
+                ForEach(snap.stops) { stop in
+                    RuleMark(x: .value("Stop", stop.milesFromHere))
+                        .foregroundStyle(.green.opacity(0.55))
+                        .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
+                }
+            }
+            .chartYAxisLabel("Elevation (ft)")
+            .chartXAxisLabel("Miles from here")
+            .frame(height: 170)
+        } header: {
+            Text("Elevation")
+        } footer: {
+            Text("Green dashes are planned charging stops. Climbs cost energy and descents give it back through regen; the planner integrates the whole profile per leg.")
         }
     }
 
