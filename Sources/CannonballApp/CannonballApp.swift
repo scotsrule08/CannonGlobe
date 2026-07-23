@@ -31,7 +31,7 @@ public struct CannonballScene: Scene {
 struct RootView: View {
     let model: AppModel
     @State private var tab: Tab = .drive
-    enum Tab { case drive, charge, car, battery, compare, settings }
+    enum Tab { case drive, charge, car, battery, weather, compare, settings }
 
     var body: some View {
         // Order = tab-bar priority. The four run-critical screens stay direct;
@@ -46,6 +46,9 @@ struct RootView: View {
             BatteryView(model: model)
                 .tag(Tab.battery)
                 .tabItem { Label("Battery", systemImage: "minus.plus.batteryblock.fill") }
+            WeatherView(model: model)
+                .tag(Tab.weather)
+                .tabItem { Label("Weather", systemImage: "cloud.sun.fill") }
             CompareScreenView(model: model.compare)
                 .tag(Tab.compare)
                 .tabItem { Label("Compare", systemImage: "arrow.triangle.branch") }

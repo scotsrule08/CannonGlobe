@@ -75,7 +75,7 @@ public struct ChargeCurveModel: Sendable {
     }
 
     // MARK: - Piecewise-linear interpolation over sorted (x, y) anchors.
-    static func interpolate(_ table: [(Double, Double)], at x: Double) -> Double {
+    public static func interpolate(_ table: [(Double, Double)], at x: Double) -> Double {
         guard let first = table.first, let last = table.last else { return 0 }
         if x <= first.0 { return first.1 }
         if x >= last.0 { return last.1 }

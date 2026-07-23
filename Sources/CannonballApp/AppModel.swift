@@ -126,6 +126,78 @@ public final class AppModel {
         public var canStreaming: Bool
     }
 
+    // MARK: weather along the route
+
+    struct WeatherSnapshot: Sendable {
+        struct Point: Identifiable, Sendable {
+            var id: Int
+            var milesFromHere: Double
+            var headwindMph: Double        // + headwind, − tailwind
+            var crosswindMph: Double
+            var tempF: Double
+            var precipMmPerHour: Double
+            var etaMinutes: Double
+        }
+        struct StopWeather: Identifiable, Sendable {
+            var id: String
+            var name: String
+            var milesFromHere: Double
+            var headwindMph: Double
+            var tempF: Double
+            var precipMmPerHour: Double
+        }
+        var points: [Point] = []
+        var stops: [StopWeather] = []
+        var destinationName: String?
+        var hasData = false
+    }
+
+    func weatherSnapshot() -> WeatherSnapshot {
+        var snap = WeatherSnapshot()
+        guard let trip = activeTrip else { return snap }
+        snap.destinationName = trip.destinationName
+        let anchors = trip.weatherAnchors
+        guard !anchors.isEmpty else { return snap }
+        snap.hasData = true
+
+        let currentMile = latestState.map { trip.mile(of: $0.coordinate.value) } ?? 0
+        let mph = max(30, trip.avgSpeedMps * 2.237)
+
+        snap.points = anchors.enumerated().compactMap { index, a in
+            let ahead = a.mile - currentMile
+            guard ahead >= -5, ahead <= 900 else { return nil }
+            return WeatherSnapshot.Point(
+                id: index,
+                milesFromHere: ahead,
+                headwindMph: a.headwindMps * 2.23694,
+                crosswindMph: a.crosswindMps * 2.23694,
+                tempF: a.ambientC * 9 / 5 + 32,
+                precipMmPerHour: a.precipMmPerHour,
+                etaMinutes: max(0, ahead) / mph * 60)
+        }
+
+        // Conditions at each planned stop, interpolated from the anchors.
+        func at(_ keyPath: KeyPath<RouteCorridor.WeatherAnchor, Double>, mile: Double) -> Double {
+            ChargeCurveModel.interpolate(anchors.map { ($0.mile, $0[keyPath: keyPath]) }, at: mile)
+        }
+        for stop in latestSolution?.plan.stops ?? [] {
+            guard let site = sites.first(where: { $0.id == stop.siteID }) else { continue }
+            snap.stops.append(WeatherSnapshot.StopWeather(
+                id: stop.siteID,
+                name: site.name.components(separatedBy: ",").first ?? site.name,
+                milesFromHere: site.routeMile - currentMile,
+                headwindMph: at(\.headwindMps, mile: site.routeMile) * 2.23694,
+                tempF: at(\.ambientC, mile: site.routeMile) * 9 / 5 + 32,
+                precipMmPerHour: max(0, at(\.precipMmPerHour, mile: site.routeMile))))
+        }
+        return snap
+    }
+
+    /// Manual weather refresh (the automatic pass runs hourly).
+    public func refreshWeatherNow() async {
+        await refreshTripWeather()
+    }
+
     func batterySnapshot() async -> BatterySnapshot {
         BatterySnapshot(state: latestState,
                         cloud: await tessie.latestCloudState(),
