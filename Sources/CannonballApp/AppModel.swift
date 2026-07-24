@@ -399,6 +399,9 @@ public final class AppModel {
         runLog = nil
         try? FileManager.default.removeItem(at: runLogURL)
         dashboard.paceText = nil; dashboard.etaText = nil
+        dashboard.activeRecommendation = nil
+        latestSolution = nil
+        Task { await engine.clearPlans() }
         activeTrip = nil
         sites = CorridorSeed.superchargers()
         dashboard.tripDestinationName = nil
@@ -423,6 +426,10 @@ public final class AppModel {
                 return
             }
         }
+    }
+
+    func currentCarCoordinate() async -> CLLocationCoordinate2D? {
+        await carCoordinate()
     }
 
     private func carCoordinate() async -> CLLocationCoordinate2D? {

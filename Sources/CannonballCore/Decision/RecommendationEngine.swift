@@ -184,6 +184,13 @@ public actor RecommendationEngine {
         currentSession = nil
     }
 
+    /// Trip ended: forget the plans so no advisor coaches a deleted route.
+    public func clearPlans() {
+        activePlan = nil
+        teslaNavPlan = nil
+        currentSession = nil
+    }
+
     /// Entry point for advisors computed outside the engine (charge coach,
     /// pace advice, precondition timing) — same arbitration and cooldowns.
     public func submit(kind: Recommendation.Kind, message: String,

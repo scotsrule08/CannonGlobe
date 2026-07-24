@@ -16,6 +16,7 @@ struct SettingsView: View {
     @AppStorage("raceModeEnabled") private var raceMode = true
     @AppStorage("canBridgeEnabled") private var canBridge = false
     @AppStorage("canBridgeHost") private var canHost = "192.168.4.1"
+    @AppStorage("nrelApiKey") private var nrelKey = "DEMO_KEY"
     @State private var bridgeStats = PandaClient.BridgeStats()
     @State private var probeResults: [BridgeProbe.Result] = []
     @State private var probing = false
@@ -210,6 +211,15 @@ struct SettingsView: View {
                             .foregroundStyle(.secondary)
                     }
                     .font(.caption)
+                }
+                Section {
+                    TextField("NREL API key (optional)", text: $nrelKey)
+                        .autocorrectionDisabled()
+                        .font(.body.monospaced())
+                } header: {
+                    Text("Charger finder")
+                } footer: {
+                    Text("The Chargers tab uses the DOE Alternative Fuels Data Center. The built-in DEMO_KEY has tight rate limits; a free key from developer.nrel.gov/signup removes them.")
                 }
                 Section {
                     Button("Reset learned efficiency", role: .destructive) {
